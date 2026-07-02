@@ -91,7 +91,11 @@ class RegisterView(GenericAPIView):
     @extend_schema(
         summary="Register new user",
         responses={
-            201: get_envelope_serializer('RegisterResponse', inline_serializer('RegisterData', {'email': serializers.EmailField()})),
+            201: get_envelope_serializer('AuthResponse', inline_serializer('AuthData', {
+                'access': serializers.CharField(),
+                'refresh': serializers.CharField(),
+                'user': UserProfileSerializer(),
+            })),
             400: OpenApiResponse(description="Validation error"),
         }
     )
@@ -100,10 +104,18 @@ class RegisterView(GenericAPIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
 
-        logger.info('New user registered: %s', user.email)
+        logger.info('New user registered (OTP bypassed): %s', user.email)
+        
+        refresh = RefreshToken.for_user(user)
+        token_data = {
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': UserProfileSerializer(user).data,
+        }
+
         return success_response(
-            message='Account created. Please check your email for the verification OTP.',
-            data={'email': user.email},
+            message='Account created successfully. Welcome to AgroTrack!',
+            data=token_data,
             http_status=status.HTTP_201_CREATED,
         )
 

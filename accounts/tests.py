@@ -130,19 +130,22 @@ class RegisterTests(APITestCase):
         response = self.client.post(self.url, self.valid_payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(response.data['success'])
-        self.assertIn('email', response.data['data'])
+        self.assertIn('access', response.data['data'])
+        self.assertIn('refresh', response.data['data'])
+        self.assertIn('user', response.data['data'])
 
         user = User.objects.get(email='john@example.com')
-        self.assertFalse(user.is_active, 'User must be inactive before OTP verification')
-        self.assertFalse(user.is_verified)
+        self.assertTrue(user.is_active, 'User must be active due to OTP bypass')
+        self.assertTrue(user.is_verified)
 
-    def test_register_creates_one_otp_record(self):
+    def test_register_creates_no_otp_record(self):
+        """No OTP is generated while SMTP is bypassed."""
         self.client.post(self.url, self.valid_payload, format='json')
         user = User.objects.get(email='john@example.com')
         count = OTPVerification.objects.filter(
-            user=user, purpose=OTPVerification.Purpose.REGISTRATION, is_used=False
+            user=user, purpose=OTPVerification.Purpose.REGISTRATION
         ).count()
-        self.assertEqual(count, 1)
+        self.assertEqual(count, 0)
 
     def test_register_duplicate_email(self):
         make_user(email='john@example.com')

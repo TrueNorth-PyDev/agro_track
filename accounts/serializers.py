@@ -138,20 +138,17 @@ class RegisterSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        """Create inactive user, then trigger OTP email."""
+        """Create active user directly, bypassing OTP for now."""
         user = User.objects.create_user(
             email=validated_data['email'],
             password=validated_data['password'],
             full_name=validated_data['full_name'],
             phone_number=validated_data.get('phone_number', ''),
             delivery_address=validated_data.get('delivery_address', ''),
-            is_active=False,
-            is_verified=False,
+            is_active=True,
+            is_verified=True,
         )
-        # If OTP send fails, _create_and_send_otp raises ValidationError.
-        # The user record exists but is inactive — acceptable because they
-        # can re-trigger resend-otp with the same email.
-        _create_and_send_otp(user, purpose=OTPVerification.Purpose.REGISTRATION)
+        # OTP bypass: no email sent for now.
         return user
 
 
