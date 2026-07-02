@@ -1,0 +1,15 @@
+# railway.toml — AgroTrack Deployment Configuration
+# Docs: https://docs.railway.com/reference/config-as-code
+# Schema: https://railway.com/railway.schema.json
+
+[build]
+builder = "RAILPACK"
+buildCommand = "pip install -r requirements.txt && python manage.py collectstatic --noinput"
+
+[deploy]
+startCommand = "gunicorn agrotrack.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 2 --worker-class gthread --log-file - --access-logfile -"
+preDeployCommand = ["python manage.py migrate --noinput"]
+healthcheckPath = "/api/schema/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
