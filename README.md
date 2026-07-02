@@ -1,7 +1,7 @@
-# Agro Track — Backend API
+# AgroTrack — Backend API
 
-> Logistics dispatch platform for agro commodities.  
-> Connects **Senders/Receivers** and **Dispatchers** to manage orders from creation through delivery and proof of delivery (POD).
+> A production-ready logistics dispatch platform for agro commodities.  
+> Connects **Senders/Receivers**, **Dispatchers**, and **Admins** to manage shipments from creation through proof-of-delivery (POD), with fleet management, analytics, and public tracking.
 
 ---
 
@@ -10,12 +10,12 @@
 | Layer | Technology |
 |---|---|
 | Framework | Django 5.2 + Django REST Framework 3.17 |
-| Auth | SimpleJWT (stateless, rotating refresh tokens) |
+| Auth | SimpleJWT (stateless, rotating refresh tokens + blacklist) |
 | Database | PostgreSQL (Railway) / SQLite (local dev) |
 | Static Files | WhiteNoise (compressed + fingerprinted) |
-| Schema / Docs | drf-spectacular (OpenAPI 3) |
-| Build | Railpack via Railway |
-| Runtime | Python 3.12 |
+| Schema / Docs | drf-spectacular (OpenAPI 3 — ReDoc + Swagger) |
+| Deployment | Railpack via Railway |
+| Runtime | Python 3.14 |
 
 ---
 
@@ -23,27 +23,49 @@
 
 ```
 agrotrack/
-├── accounts/               # Auth & user management app
-│   ├── migrations/
-│   ├── admin.py
+├── accounts/               # Auth & user management
+│   ├── admin.py            # User model registered in Django Admin
 │   ├── managers.py         # Custom UserManager (email-based auth)
 │   ├── models.py           # User, OTPVerification
-│   ├── permissions.py      # RBAC permission classes
-│   ├── serializers.py      # All auth business logic
-│   ├── tests.py            # 54 unit tests
-│   ├── urls.py
-│   ├── utils.py            # OTP utils, email helpers, exception handler
-│   └── views.py            # API endpoints + OpenAPI schema annotations
+│   ├── permissions.py      # RBAC permission classes (IsSender, IsDispatcher, IsAdminUser…)
+│   ├── serializers.py      # All auth business logic + UserProfile
+│   ├── tests.py            # Auth test suite
+│   ├── urls.py             # Mounted at /api/v1/auth/
+│   ├── utils.py            # OTP utils, email helpers, custom exception handler
+│   └── views.py            # API views + OpenAPI annotations
+│
+├── orders/                 # Order lifecycle, fleet, drivers, reports
+│   ├── admin.py            # Order, Driver, Vehicle registered in Django Admin
+│   ├── models.py           # Order, Driver, Vehicle, OrderStatusHistory, OrderMessage
+│   ├── serializers.py      # OrderCreate, OrderList, OrderDetail, Driver, Vehicle…
+│   ├── tests.py            # Orders & fleet test suite
+│   ├── urls.py             # Mounted at /api/v1/orders/
+│   └── views.py            # API views + OpenAPI annotations
+│
+├── admin_api/              # Admin-only portal endpoints
+│   ├── admin.py            # PlatformSettings registered in Django Admin
+│   ├── models.py           # PlatformSettings (singleton)
+│   ├── serializers.py      # Admin-scoped serializers for users, drivers, vehicles, settings
+│   ├── tests.py            # Admin API test suite
+│   ├── urls.py             # Mounted at /api/v1/admin/
+│   └── views.py            # Admin views + OpenAPI annotations
+│
+├── public_api/             # Unauthenticated public endpoints
+│   ├── serializers.py      # PublicTrackingSerializer
+│   ├── tests.py            # Public API test suite
+│   ├── urls.py             # Mounted at /api/v1/public/
+│   └── views.py            # PublicPlatformStatsView, PublicTrackingView
+│
 ├── agrotrack/
 │   ├── settings.py         # Main settings
 │   ├── settings_test.py    # Test overrides (no throttle, MD5 hasher)
 │   ├── urls.py             # Root URL config + docs routes
 │   └── wsgi.py
+│
 ├── .env.example            # Environment variable reference
-├── .gitignore
-├── manage.py
 ├── railway.toml            # Railway deployment config (Railpack)
-└── requirements.txt
+├── requirements.txt
+└── schema.yml              # Generated OpenAPI 3 schema
 ```
 
 ---
@@ -76,7 +98,7 @@ cp .env.example .env
 # 5. Apply migrations
 python manage.py migrate
 
-# 6. Create a superuser (optional)
+# 6. Create a superuser (for /admin/ access)
 python manage.py createsuperuser
 
 # 7. Start the dev server
@@ -96,17 +118,23 @@ python -c "from django.core.management.utils import get_random_secret_key; print
 ## Running Tests
 
 ```bash
-# Full test suite (54 tests, ~1s)
+# Full test suite (79 tests)
+python manage.py test --settings=agrotrack.settings_test
+
+# Single app
 python manage.py test accounts --settings=agrotrack.settings_test
+python manage.py test orders --settings=agrotrack.settings_test
+python manage.py test admin_api --settings=agrotrack.settings_test
+python manage.py test public_api --settings=agrotrack.settings_test
 
 # Verbose output
-python manage.py test accounts --settings=agrotrack.settings_test --verbosity=2
+python manage.py test --settings=agrotrack.settings_test --verbosity=2
 ```
 
 Test settings (`settings_test.py`) automatically:
-- Disable all throttling (no 429s in the runner)
-- Use MD5 password hasher (33× faster than PBKDF2)
-- Force console email backend
+- Disable all throttling (no 429s in the test runner)
+- Use MD5 password hasher (significantly faster than PBKDF2)
+- Force console email backend (OTPs printed to stdout)
 
 ---
 
@@ -119,6 +147,79 @@ When the server is running, interactive docs are available at:
 | `/api/docs/` | **ReDoc** — full reference UI |
 | `/api/docs/swagger/` | **Swagger UI** — interactive testing |
 | `/api/schema/` | Raw OpenAPI 3 YAML schema |
+
+---
+
+## API Overview
+
+### Authentication (`/api/v1/auth/`)
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/register/` | None | Register a new sender account |
+| POST | `/verify-otp/` | None | Verify email OTP |
+| POST | `/resend-otp/` | None | Resend registration OTP |
+| POST | `/login/` | None | Login and obtain JWT pair |
+| POST | `/token/refresh/` | None | Refresh access token |
+| POST | `/logout/` | JWT | Blacklist refresh token |
+| GET / PATCH | `/me/` | JWT | Get or update user profile |
+| POST | `/password-reset/` | None | Request password reset OTP |
+| POST | `/password-reset/confirm/` | None | Confirm reset with OTP |
+
+### Orders (`/api/v1/orders/`)
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/dashboard/` | JWT | Dashboard stats (role-aware) |
+| GET | `/` | JWT | List shipments |
+| POST | `/` | JWT (Sender) | Create new shipment request |
+| GET / PATCH | `/{id}/` | JWT | Get or update shipment details |
+| GET | `/{id}/timeline/` | JWT | Auto-generated status timeline |
+| GET / POST | `/{id}/messages/` | JWT | Context-aware chat thread |
+| POST | `/{id}/messages/read/` | JWT | Mark incoming messages as read |
+| GET | `/fleet/` | JWT (Dispatcher) | Fleet overview |
+| GET | `/drivers/` | JWT (Dispatcher) | Active drivers for assignment |
+| GET | `/vehicles/` | JWT (Dispatcher) | Vehicles for assignment |
+| GET | `/reports/` | JWT (Dispatcher/Admin) | Delivery & revenue analytics |
+
+### Admin Portal (`/api/v1/admin/`)
+
+> All endpoints require a JWT from an account with `role = admin`.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/dashboard/` | Platform-wide KPI overview |
+| GET | `/users/` | List all sender accounts |
+| GET / PATCH | `/users/{id}/` | View or suspend a user |
+| GET / POST | `/dispatchers/` | List dispatchers or create one |
+| GET / PATCH | `/dispatchers/{id}/` | View or update a dispatcher |
+| GET / POST | `/drivers/` | List drivers or register one |
+| GET / PATCH | `/drivers/{id}/` | View or verify a driver |
+| GET / POST | `/vehicles/` | Fleet registry list or add vehicle |
+| GET / PATCH | `/vehicles/{id}/` | View or update a vehicle |
+| GET / PATCH | `/settings/` | View or update platform settings |
+| GET | `/analytics/` | Revenue, region, and user acquisition charts |
+
+### Public API (`/api/v1/public/`)
+
+> No authentication required.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/stats/` | Platform statistics for marketing page |
+| GET | `/track/{tracking_number}/` | Track a shipment by its tracking number |
+
+---
+
+## User Roles
+
+| Role | Value | Description |
+|---|---|---|
+| Sender / Receiver | `sender` | Creates orders, tracks delivery, confirms POD |
+| Dispatcher | `dispatcher` | Manages order queue, assigns drivers/vehicles |
+| Admin | `admin` | Platform administration, user and fleet management |
+
+Role is set at registration via the `role` field (defaults to `sender` if omitted).
 
 ---
 
@@ -142,6 +243,10 @@ Set these in your Railway service's **Variables** tab:
 | `EMAIL_HOST_PASSWORD` | ✅ | SMTP password / app password |
 | `DEFAULT_FROM_EMAIL` | ❌ | Defaults to `AgroTrack <noreply@agrotrack.com>` |
 | `OTP_EXPIRY_MINUTES` | ❌ | Defaults to `10` |
+| `AWS_STORAGE_BUCKET_NAME` | ❌ | S3 bucket name (REQUIRED for POD image uploads) |
+| `AWS_ACCESS_KEY_ID` | ❌ | AWS Access Key (REQUIRED if bucket name is set) |
+| `AWS_SECRET_ACCESS_KEY` | ❌ | AWS Secret Key (REQUIRED if bucket name is set) |
+| `AWS_S3_REGION_NAME` | ❌ | e.g. `eu-west-1` (Defaults to `us-east-1`) |
 
 ### Deploy Flow
 
@@ -159,31 +264,23 @@ Railway runs these steps automatically on every push:
 
 ### Django Admin
 
-Available at `/admin/`. Requires a superuser — create one via Railway's shell:
+Available at `/admin/`. Create a superuser via Railway's shell:
 
 ```bash
 python manage.py createsuperuser
 ```
 
----
-
-## User Roles
-
-| Role | Value | Description |
-|---|---|---|
-| Sender / Receiver | `sender` | Creates orders, tracks delivery, confirms POD |
-| Dispatcher | `dispatcher` | Manages order queue, assigns drivers/vehicles |
-| Admin | `admin` | Platform administration, user management |
-
-Role is set at registration via the `role` field (defaults to `sender` if omitted).
+All models are registered: **User**, **OTPVerification**, **Order**, **Driver**, **Vehicle**, **OrderStatusHistory**, **PlatformSettings**.
 
 ---
 
 ## Security
 
-- **Passwords**: Hashed with PBKDF2 + SHA-256; validated against Django's full validator suite including similarity checks
-- **OTPs**: SHA-256 hashed, never stored in plaintext; compared with `hmac.compare_digest` (timing-safe)
+- **Passwords**: PBKDF2 + SHA-256; full Django validator suite including similarity checks
+- **OTPs**: SHA-256 hashed, never stored in plaintext; constant-time comparison via `hmac.compare_digest`
 - **JWT**: 15-min access tokens, 7-day rotating refresh tokens; blacklisted on logout
 - **Throttling**: Anon `20/min`, user `100/min`, OTP resend `3/hour`, login `10/min`
-- **HSTS**: 1-year max-age with preload (production only)
+- **HSTS**: 1-year max-age with subdomains + preload (production only)
 - **HTTPS**: SSL redirect enforced in production (`SECURE_SSL_REDIRECT=True`)
+- **UUIDs**: User primary keys are UUIDs — no sequential ID leakage
+- **CORS**: Strict origin whitelist via `CORS_ALLOWED_ORIGINS`

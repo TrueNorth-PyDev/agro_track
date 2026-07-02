@@ -19,6 +19,7 @@ from django.utils import timezone
 
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
+from drf_spectacular.utils import extend_schema_field
 
 from .models import OTPVerification
 from .utils import generate_otp, hash_otp, verify_otp, send_otp_email, get_otp_expiry
@@ -423,10 +424,10 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 class UserProfileSerializer(serializers.ModelSerializer):
     """
     Safe, read-only representation of a User returned after
-    login, OTP verification, or direct profile fetches.
-
-    Password and sensitive fields are never included.
+    login, OTP verification, or direct profile fetches,
+    and supports updating profile contact & preferences.
     """
+    total_shipments = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -435,9 +436,27 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'email',
             'full_name',
             'phone_number',
+            'business_name',
             'delivery_address',
             'role',
             'is_verified',
             'date_joined',
+            'notify_status_updates',
+            'notify_delivery_confirmation',
+            'notify_promotions',
+            'rating',
+            'on_time_percentage',
+            'total_shipments'
         )
-        read_only_fields = fields
+        read_only_fields = (
+            'id', 'email', 'role', 'is_verified', 'date_joined', 
+            'rating', 'on_time_percentage', 'total_shipments'
+        )
+        
+    @extend_schema_field(serializers.IntegerField())
+    def get_total_shipments(self, obj):
+        if obj.is_sender:
+            return obj.sent_orders.count()
+        elif obj.is_dispatcher:
+            return obj.dispatched_orders.count()
+        return 0

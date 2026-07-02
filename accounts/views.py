@@ -91,7 +91,7 @@ class RegisterView(GenericAPIView):
     @extend_schema(
         summary="Register new user",
         responses={
-            201: get_envelope_serializer('AuthResponse', inline_serializer('AuthData', {
+            201: get_envelope_serializer('RegisterAuthResponse', inline_serializer('RegisterAuthData', {
                 'access': serializers.CharField(),
                 'refresh': serializers.CharField(),
                 'user': UserProfileSerializer(),
@@ -345,6 +345,22 @@ class MeView(GenericAPIView):
         serializer = self.get_serializer(request.user)
         return success_response(
             message='Profile retrieved.',
+            data=serializer.data,
+        )
+
+    @extend_schema(
+        summary="Update Current User Profile",
+        responses={
+            200: get_envelope_serializer('MeUpdateResponse', UserProfileSerializer()),
+            400: OpenApiResponse(description="Validation error"),
+        }
+    )
+    def patch(self, request, *args, **kwargs):
+        serializer = self.get_serializer(request.user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return success_response(
+            message='Profile updated successfully.',
             data=serializer.data,
         )
 

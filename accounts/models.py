@@ -68,6 +68,21 @@ class User(AbstractBaseUser, PermissionsMixin):
         help_text=_('Designates whether the user can log into the admin site.'),
     )
 
+    # Profile & Contact Info
+    business_name = models.CharField(_('business name'), max_length=255, blank=True)
+    
+    # Notification Preferences
+    notify_status_updates = models.BooleanField(default=True)
+    notify_delivery_confirmation = models.BooleanField(default=True)
+    notify_promotions = models.BooleanField(default=False)
+    
+    # Stats placeholders
+    rating = models.DecimalField(max_digits=3, decimal_places=1, default=5.0)
+    on_time_percentage = models.IntegerField(default=100)
+    
+    # Dispatcher Specific
+    territory = models.CharField(_('territory'), max_length=255, blank=True)
+
     # Timestamps
     date_joined = models.DateTimeField(_('date joined'), default=timezone.now)
     updated_at = models.DateTimeField(_('last updated'), auto_now=True)

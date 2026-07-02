@@ -41,6 +41,9 @@ INSTALLED_APPS = [
 
     # Local apps
     'accounts',
+    'orders',
+    'admin_api',
+    'public_api',
 ]
 
 MIDDLEWARE = [
@@ -143,13 +146,19 @@ REST_FRAMEWORK = {
 # drf-spectacular (OpenAPI 3 / ReDoc)
 # ---------------------------------------------------------------------------
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Agro Track API',
-    'DESCRIPTION': 'API documentation for Agro Track logistics dispatch platform.',
+    'TITLE': 'AgroTrack API',
+    'DESCRIPTION': (
+        'REST API documentation for the AgroTrack agricultural logistics dispatch platform. '
+        'Covers authentication, order management, fleet tracking, and admin operations.'
+    ),
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'COMPONENT_SPLIT_REQUEST': True,
     'ENUM_NAME_OVERRIDES': {
-        'RoleEnum': 'accounts.models.User.Role',
+        'UserRoleEnum': 'accounts.models.User.Role',
+        'OrderStatusEnum': 'orders.models.Order.Status',
+        'OrderPriorityEnum': 'orders.models.Order.Priority',
+        'VehicleStatusEnum': 'orders.models.Vehicle.Status',
     },
 }
 
@@ -237,10 +246,30 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # WhiteNoise: serve compressed, fingerprinted static files with long cache TTLs
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
-# Media (uploaded files) — ephemeral on Railway's filesystem.
-# TODO: switch to django-storages + S3/R2 when POD photo upload feature lands.
+# Media (uploaded files)
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# AWS S3 Storage (for POD uploads in production)
+# If AWS_STORAGE_BUCKET_NAME is provided, we use S3. Otherwise, local disk.
+AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='')
+
+if AWS_STORAGE_BUCKET_NAME:
+    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
+    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
+    
+    # Don't overwrite identical files, use standard Django naming (adds random suffix)
+    AWS_S3_FILE_OVERWRITE = False
+    
+    # Require S3 to use presigned URLs since these might be sensitive business docs
+    # Or False if the bucket is fully public. Defaults to private/presigned.
+    AWS_QUERYSTRING_AUTH = config('AWS_QUERYSTRING_AUTH', default=True, cast=bool)
+    AWS_QUERYSTRING_EXPIRE = 3600  # 1 hour
+    
+    # Use s3boto3 backend for all media uploads (like PODs)
+    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +321,11 @@ LOGGING = {
             'propagate': False,
         },
         'accounts': {
+            'handlers': ['console'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+        'orders': {
             'handlers': ['console'],
             'level': 'DEBUG' if DEBUG else 'INFO',
             'propagate': False,
