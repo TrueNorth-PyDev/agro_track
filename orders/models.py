@@ -18,16 +18,18 @@ def generate_tracking_number():
 def generate_driver_id():
     """Generates a sequential driver ID like D001, D002, etc."""
     from django.apps import apps
+    from django.db import transaction
     from django.db.utils import OperationalError, ProgrammingError
     Driver = apps.get_model('orders', 'Driver')
     try:
-        last_driver = Driver.objects.order_by('id').last()
-        if last_driver and getattr(last_driver, 'driver_id', None) and last_driver.driver_id.startswith('D'):
-            try:
-                num = int(last_driver.driver_id[1:])
-                return f"D{num + 1:03d}"
-            except ValueError:
-                pass
+        with transaction.atomic():
+            last_driver = Driver.objects.order_by('id').last()
+            if last_driver and getattr(last_driver, 'driver_id', None) and last_driver.driver_id.startswith('D'):
+                try:
+                    num = int(last_driver.driver_id[1:])
+                    return f"D{num + 1:03d}"
+                except ValueError:
+                    pass
     except (OperationalError, ProgrammingError):
         pass
     rand_suffix = ''.join(random.choices(string.digits, k=4))
