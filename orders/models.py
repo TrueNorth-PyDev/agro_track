@@ -18,7 +18,7 @@ def generate_tracking_number():
 def generate_driver_id():
     """Generates a sequential driver ID like D001, D002, etc."""
     from django.apps import apps
-    from django.db.utils import OperationalError
+    from django.db.utils import OperationalError, ProgrammingError
     Driver = apps.get_model('orders', 'Driver')
     try:
         last_driver = Driver.objects.order_by('id').last()
@@ -28,7 +28,7 @@ def generate_driver_id():
                 return f"D{num + 1:03d}"
             except ValueError:
                 pass
-    except OperationalError:
+    except (OperationalError, ProgrammingError):
         pass
     rand_suffix = ''.join(random.choices(string.digits, k=4))
     return f"D{rand_suffix}"
