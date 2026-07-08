@@ -3,10 +3,11 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.generics import RetrieveAPIView
-from drf_spectacular.utils import extend_schema, OpenApiResponse
+from accounts.views import success_response, get_envelope_serializer
+from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer
+from rest_framework import serializers
 
 from orders.models import Order
-from accounts.views import success_response
 from .serializers import PublicTrackingSerializer
 
 
@@ -27,7 +28,11 @@ class PublicPlatformStatsView(APIView):
             "Retrieves high-level statistics shown on the public marketing site: "
             "deliveries completed, states served, and customer rating."
         ),
-        responses={200: OpenApiResponse(description="Platform statistics")}
+        responses={200: get_envelope_serializer('PublicStatsResponse', inline_serializer('PublicStats', {
+            'deliveries_completed': serializers.CharField(),
+            'states_served': serializers.CharField(),
+            'customer_rating': serializers.CharField(),
+        }))}
     )
     def get(self, request, *args, **kwargs):
         deliveries_completed = Order.objects.filter(status=Order.Status.COMPLETED).count()
@@ -62,8 +67,8 @@ class PublicTrackingView(RetrieveAPIView):
             "No authentication is required."
         ),
         responses={
-            200: PublicTrackingSerializer,
-            404: OpenApiResponse(description="Shipment not found")
+            200: get_envelope_serializer('PublicTrackingResponse', PublicTrackingSerializer()),
+            404: OpenApiResponse(description="Tracking number not found"),
         }
     )
     def get(self, request, *args, **kwargs):

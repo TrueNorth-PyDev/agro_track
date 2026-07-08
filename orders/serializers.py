@@ -64,6 +64,18 @@ class OrderStatusHistorySerializer(serializers.ModelSerializer):
         return obj.display_name or obj.get_status_display()
 
 
+class TimelineEventUpdateSerializer(serializers.ModelSerializer):
+    """
+    Write-only serializer for patching a single timeline event.
+
+    Only `display_name` and `description` are editable — the status and
+    timestamp are append-only and must not be mutated after creation.
+    """
+    class Meta:
+        model = OrderStatusHistory
+        fields = ('display_name', 'description')
+
+
 class OrderMessageSerializer(serializers.ModelSerializer):
     """
     Serializer for a single chat message in an order's conversation thread.

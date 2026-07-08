@@ -1,14 +1,13 @@
 from rest_framework import status
-from rest_framework.response import Response
 from rest_framework.generics import GenericAPIView, ListAPIView, RetrieveUpdateAPIView, CreateAPIView
-from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from django.contrib.auth import get_user_model
-from django.db.models import Sum, Avg
+from django.db.models import Sum, Avg, Count
+from django.db.models.functions import TruncMonth
 from django.utils import timezone
 from datetime import timedelta
 
-from accounts.views import success_response
+from accounts.views import success_response, get_envelope_serializer
 from accounts.permissions import IsAdminUser
 from orders.models import Order, Vehicle, Driver
 from .serializers import (
@@ -44,7 +43,7 @@ class AdminDashboardView(GenericAPIView):
         total_shipments = this_month_orders.count()
         
         # Revenue
-        platform_revenue = sum([float(o.total_cost) for o in this_month_orders])
+        platform_revenue = this_month_orders.aggregate(total=Sum('total_cost'))['total'] or 0.0
         
         # Determine if we should use mock data for growth trend
         all_orders_count = Order.objects.count()
@@ -71,21 +70,28 @@ class AdminDashboardView(GenericAPIView):
                 if i < len(trend_months):
                     item['month'] = trend_months[i]
         else:
-            # Generate actual trend
-            from collections import defaultdict
-            users_by_month = defaultdict(int)
-            shipments_by_month = defaultdict(int)
-            
-            # 6 months ago
+            # Generate actual trend using DB aggregation
             trend_start = (now.replace(day=1) - timedelta(days=5*32)).replace(day=1)
             
-            for user in User.objects.filter(date_joined__gte=trend_start):
-                m_name = user.date_joined.strftime('%b')
-                users_by_month[m_name] += 1
-                
-            for order in Order.objects.filter(created_at__gte=trend_start):
-                m_name = order.created_at.strftime('%b')
-                shipments_by_month[m_name] += 1
+            # Aggregate users by month
+            user_counts = list(
+                User.objects.filter(date_joined__gte=trend_start)
+                .annotate(month=TruncMonth('date_joined'))
+                .values('month')
+                .annotate(count=Count('id'))
+                .order_by('month')
+            )
+            users_by_month = {item['month'].strftime('%b'): item['count'] for item in user_counts}
+
+            # Aggregate orders by month
+            order_counts = list(
+                Order.objects.filter(created_at__gte=trend_start)
+                .annotate(month=TruncMonth('created_at'))
+                .values('month')
+                .annotate(count=Count('id'))
+                .order_by('month')
+            )
+            shipments_by_month = {item['month'].strftime('%b'): item['count'] for item in order_counts}
                 
             # cumulative sum approx
             months_order = []
@@ -132,6 +138,10 @@ class AdminUserListView(ListAPIView):
     def get_queryset(self):
         return User.objects.filter(role=User.Role.SENDER).order_by('-date_joined')
         
+    @extend_schema(
+        summary="List all sender users",
+        responses={200: get_envelope_serializer('AdminUserListResponse', AdminUserSerializer(many=True))}
+    )
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
@@ -147,11 +157,19 @@ class AdminUserDetailView(RetrieveUpdateAPIView):
     queryset = User.objects.all()
     serializer_class = AdminUserDetailSerializer
     
+    @extend_schema(
+        summary="Get user details",
+        responses={200: get_envelope_serializer('AdminUserDetailResponse', AdminUserDetailSerializer())}
+    )
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return success_response('User details retrieved', data=serializer.data)
         
+    @extend_schema(
+        summary="Update user status",
+        responses={200: get_envelope_serializer('AdminUserUpdateResponse', AdminUserDetailSerializer())}
+    )
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         if 'is_active' in request.data:
@@ -177,11 +195,20 @@ class AdminDispatcherListView(ListAPIView, CreateAPIView):
     def get_queryset(self):
         return User.objects.filter(role=User.Role.DISPATCHER).order_by('-date_joined')
         
+    @extend_schema(
+        summary="List dispatchers",
+        responses={200: get_envelope_serializer('AdminDispatcherListResponse', AdminUserSerializer(many=True))}
+    )
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return success_response('Dispatchers retrieved', data=serializer.data)
         
+    @extend_schema(
+        summary="Create a new dispatcher",
+        request=AdminDispatcherCreateSerializer,
+        responses={201: get_envelope_serializer('AdminDispatcherCreateResponse', AdminUserDetailSerializer())}
+    )
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -202,11 +229,19 @@ class AdminDispatcherDetailView(RetrieveUpdateAPIView):
     def get_serializer_class(self):
         return AdminUserDetailSerializer
         
+    @extend_schema(
+        summary="Get dispatcher details",
+        responses={200: get_envelope_serializer('AdminDispatcherDetailResponse', AdminUserDetailSerializer())}
+    )
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return success_response('Dispatcher details retrieved', data=serializer.data)
         
+    @extend_schema(
+        summary="Update dispatcher details",
+        responses={200: get_envelope_serializer('AdminDispatcherUpdateResponse', AdminUserDetailSerializer())}
+    )
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         updated = False
@@ -241,11 +276,20 @@ class AdminDriverListView(ListAPIView, CreateAPIView):
     def get_queryset(self):
         return Driver.objects.all().order_by('-created_at')
         
+    @extend_schema(
+        summary="List drivers",
+        responses={200: get_envelope_serializer('AdminDriverListResponse', AdminDriverSerializer(many=True))}
+    )
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return success_response('Drivers retrieved', data=serializer.data)
         
+    @extend_schema(
+        summary="Create driver",
+        request=AdminDriverCreateSerializer,
+        responses={201: get_envelope_serializer('AdminDriverCreateResponse', AdminDriverDetailSerializer())}
+    )
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -264,11 +308,19 @@ class AdminDriverDetailView(RetrieveUpdateAPIView):
         from orders.models import Driver
         return Driver.objects.all()
         
+    @extend_schema(
+        summary="Get driver details",
+        responses={200: get_envelope_serializer('AdminDriverDetailResponse', AdminDriverDetailSerializer())}
+    )
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return success_response('Driver details retrieved', data=serializer.data)
         
+    @extend_schema(
+        summary="Update driver details",
+        responses={200: get_envelope_serializer('AdminDriverUpdateResponse', AdminDriverDetailSerializer())}
+    )
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         updated = False
@@ -301,15 +353,24 @@ class AdminVehicleListView(ListAPIView, CreateAPIView):
     def get_queryset(self):
         return Vehicle.objects.select_related('assigned_driver').all().order_by('-id')
         
+    @extend_schema(
+        summary="List vehicles",
+        responses={200: get_envelope_serializer('AdminVehicleListResponse', AdminVehicleSerializer(many=True))}
+    )
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return success_response('Vehicles retrieved', data=serializer.data)
         
+    @extend_schema(
+        summary="Create vehicle",
+        request=AdminVehicleSerializer,
+        responses={201: get_envelope_serializer('AdminVehicleCreateResponse', AdminVehicleSerializer())}
+    )
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        vehicle = serializer.save()
+        serializer.save()
         return success_response('Vehicle registered successfully', data=serializer.data, http_status=status.HTTP_201_CREATED)
 
 class AdminVehicleDetailView(RetrieveUpdateAPIView):
@@ -323,11 +384,19 @@ class AdminVehicleDetailView(RetrieveUpdateAPIView):
     def get_queryset(self):
         return Vehicle.objects.select_related('assigned_driver').all()
         
+    @extend_schema(
+        summary="Get vehicle details",
+        responses={200: get_envelope_serializer('AdminVehicleDetailResponse', AdminVehicleSerializer())}
+    )
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return success_response('Vehicle details retrieved', data=serializer.data)
         
+    @extend_schema(
+        summary="Update vehicle details",
+        responses={200: get_envelope_serializer('AdminVehicleUpdateResponse', AdminVehicleSerializer())}
+    )
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -343,11 +412,20 @@ class PlatformSettingsView(GenericAPIView):
     permission_classes = [IsAdminUser]
     serializer_class = PlatformSettingsSerializer
     
+    @extend_schema(
+        summary="Get platform settings",
+        responses={200: get_envelope_serializer('PlatformSettingsResponse', PlatformSettingsSerializer())}
+    )
     def get(self, request):
         settings = PlatformSettings.get_settings()
         serializer = self.get_serializer(settings)
         return success_response('Platform settings retrieved', data=serializer.data)
         
+    @extend_schema(
+        summary="Update platform settings",
+        request=PlatformSettingsSerializer,
+        responses={200: get_envelope_serializer('PlatformSettingsUpdateResponse', PlatformSettingsSerializer())}
+    )
     def patch(self, request):
         settings = PlatformSettings.get_settings()
         serializer = self.get_serializer(settings, data=request.data, partial=True)

@@ -297,6 +297,18 @@ class Order(models.Model):
             and old_location != self.current_location
             and self.current_location
         )
+        driver_changed = (
+            not is_new
+            and not status_changed        # already handled inside _get_timeline_event when status changes
+            and self.driver_id
+            and self.driver_id != old_driver_id
+        )
+        vehicle_changed = (
+            not is_new
+            and not status_changed
+            and self.vehicle_id
+            and self.vehicle_id != old_vehicle_id
+        )
 
         if status_changed:
             display_name, description = self._get_timeline_event(
@@ -318,6 +330,28 @@ class Order(models.Model):
                 status=self.status,
                 display_name="Location Update",
                 description=f"Currently in {self.current_location}",
+            )
+        elif driver_changed or vehicle_changed:
+            # Driver/vehicle updated on an already-assigned order (separate PATCH)
+            parts = []
+            if self.driver_id:
+                try:
+                    driver = Driver.objects.get(pk=self.driver_id)
+                    parts.append(driver.name)
+                except Driver.DoesNotExist:
+                    parts.append("Assigned Driver")
+            if self.vehicle_id:
+                try:
+                    vehicle = Vehicle.objects.get(pk=self.vehicle_id)
+                    parts.append(f"Truck {vehicle.registration_number}")
+                except Vehicle.DoesNotExist:
+                    pass
+            description = " · ".join(parts) if parts else "Driver and vehicle assigned"
+            OrderStatusHistory.objects.create(
+                order=self,
+                status=self.status,
+                display_name="Driver & Vehicle Assigned",
+                description=description,
             )
 
 

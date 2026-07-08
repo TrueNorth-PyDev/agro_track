@@ -20,7 +20,6 @@ from django.core.mail import send_mail
 from django.utils import timezone
 
 from rest_framework.views import exception_handler
-from rest_framework.response import Response
 
 logger = logging.getLogger(__name__)
 

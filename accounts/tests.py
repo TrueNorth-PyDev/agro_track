@@ -302,9 +302,6 @@ class ResendOTPTests(APITestCase):
         self.assertTrue(old_otp.is_used)
 
     def test_resend_creates_new_otp(self):
-        initial_count = OTPVerification.objects.filter(
-            user=self.user, is_used=False
-        ).count()
         self.client.post(self.url, {'email': 'resend@example.com'}, format='json')
         new_count = OTPVerification.objects.filter(
             user=self.user, is_used=False
@@ -313,7 +310,7 @@ class ResendOTPTests(APITestCase):
         self.assertEqual(new_count, 1)
 
     def test_resend_already_verified(self):
-        verified = make_user(email='alreadydone@example.com', verified=True)
+        make_user(email='alreadydone@example.com', verified=True)
         response = self.client.post(self.url, {'email': 'alreadydone@example.com'}, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 

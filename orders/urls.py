@@ -1,7 +1,8 @@
 from django.urls import path
 from .views import (
     DashboardView, OrderListView, OrderDetailView,
-    OrderTimelineView, OrderMessageListCreateView, OrderMessageMarkReadView,
+    OrderTimelineView, OrderTimelineEventUpdateView,
+    OrderMessageListCreateView, OrderMessageMarkReadView,
     FleetOverviewView, DriverListView, VehicleListView,
     ReportsView
 )
@@ -14,6 +15,7 @@ urlpatterns = [
     path('fleet/', FleetOverviewView.as_view(), name='fleet-overview'),
     path('drivers/', DriverListView.as_view(), name='driver-list'),
     path('vehicles/', VehicleListView.as_view(), name='vehicle-list'),
+    path('timeline/<int:event_id>/', OrderTimelineEventUpdateView.as_view(), name='timeline-event-update'),
     path('', OrderListView.as_view(), name='order-list'),
     path('<int:pk>/', OrderDetailView.as_view(), name='order-detail'),
     path('<int:pk>/timeline/', OrderTimelineView.as_view(), name='order-timeline'),

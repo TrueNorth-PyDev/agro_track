@@ -175,6 +175,7 @@ When the server is running, interactive docs are available at:
 | POST | `/` | JWT (Sender) | Create new shipment request |
 | GET / PATCH | `/{id}/` | JWT | Get or update shipment details |
 | GET | `/{id}/timeline/` | JWT | Auto-generated status timeline |
+| PATCH | `/timeline/{event_id}/` | JWT (Dispatcher/Admin) | Edit timeline event description |
 | GET / POST | `/{id}/messages/` | JWT | Context-aware chat thread |
 | POST | `/{id}/messages/read/` | JWT | Mark incoming messages as read |
 | GET | `/fleet/` | JWT (Dispatcher) | Fleet overview |

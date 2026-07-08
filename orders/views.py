@@ -20,13 +20,16 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiResponse
 
+from django.db.models import Count, Q
+
 from accounts.views import success_response, get_envelope_serializer
-from .models import Order, OrderStatusHistory, OrderMessage, Vehicle, Driver
+from .models import Order, OrderStatusHistory, Vehicle, Driver
 from .serializers import (
     OrderListSerializer,
     OrderDetailSerializer,
     OrderCreateSerializer,
     OrderStatusHistorySerializer,
+    TimelineEventUpdateSerializer,
     OrderMessageSerializer,
     VehicleSerializer,
     DriverSerializer,
@@ -59,14 +62,17 @@ class DashboardView(GenericAPIView):
         if user.is_dispatcher or user.is_admin_user:
             orders = Order.objects.select_related('sender', 'driver', 'vehicle').all()
 
-            total_shipments = orders.count()
-            active_shipments = orders.filter(
-                status__in=[Order.Status.IN_TRANSIT, Order.Status.PENDING_PICKUP]
-            ).count()
-            pending_shipments = orders.filter(status=Order.Status.PENDING_PICKUP).count()
-            unassigned_requests = orders.filter(
-                status=Order.Status.NEW_REQUEST, driver__isnull=True
-            ).count()
+            aggs = orders.aggregate(
+                total=Count('id'),
+                active=Count('id', filter=Q(status__in=[Order.Status.IN_TRANSIT, Order.Status.PENDING_PICKUP])),
+                pending=Count('id', filter=Q(status=Order.Status.PENDING_PICKUP)),
+                unassigned=Count('id', filter=Q(status=Order.Status.NEW_REQUEST, driver__isnull=True))
+            )
+            
+            total_shipments = aggs['total']
+            active_shipments = aggs['active']
+            pending_shipments = aggs['pending']
+            unassigned_requests = aggs['unassigned']
 
             recent_shipments = orders[:5]
             active_shipment = orders.exclude(
@@ -230,14 +236,122 @@ class OrderDetailView(GenericAPIView):
         return success_response('Shipment updated successfully.', data=serializer.data)
 
 
+# Canonical ordered lifecycle steps used to build the checklist.
+# Each tuple is (step_key, human_label, the Order.Status values that satisfy it).
+_CHECKLIST_STEPS = [
+    ('order_placed',   'Order Placed',        [Order.Status.NEW_REQUEST, Order.Status.ASSIGNED,
+                                               Order.Status.PENDING_PICKUP, Order.Status.IN_TRANSIT,
+                                               Order.Status.DELIVERED, Order.Status.COMPLETED]),
+    ('assigned',       'Dispatcher Assigned',  [Order.Status.ASSIGNED, Order.Status.PENDING_PICKUP,
+                                               Order.Status.IN_TRANSIT, Order.Status.DELIVERED,
+                                               Order.Status.COMPLETED]),
+    ('pending_pickup', 'Pickup Confirmed',     [Order.Status.PENDING_PICKUP, Order.Status.IN_TRANSIT,
+                                               Order.Status.DELIVERED, Order.Status.COMPLETED]),
+    ('in_transit',     'In Transit',           [Order.Status.IN_TRANSIT, Order.Status.DELIVERED,
+                                               Order.Status.COMPLETED]),
+    ('delivered',      'Delivered',            [Order.Status.DELIVERED, Order.Status.COMPLETED]),
+    ('completed',      'Completed',            [Order.Status.COMPLETED]),
+]
+
+# Status values that map to each step key (for matching timeline events)
+_STEP_STATUS_MAP = {
+    'order_placed':   Order.Status.NEW_REQUEST,
+    'assigned':       Order.Status.ASSIGNED,
+    'pending_pickup': Order.Status.PENDING_PICKUP,
+    'in_transit':     Order.Status.IN_TRANSIT,
+    'delivered':      Order.Status.DELIVERED,
+    'completed':      Order.Status.COMPLETED,
+}
+
+
+def _build_checklist(order, events):
+    """
+    Build the frontend-ready checklist from the order's current status and
+    its logged timeline events.
+
+    Each step has one of three states:
+      - "completed"  → past step (show a tick ✓)
+      - "current"    → the active step right now (show a spinner / highlighted)
+      - "pending"    → future step (show an empty circle)
+
+    Steps completed in the past also carry the logged event's timestamp,
+    display_name, and description so the UI can show the detail inline.
+
+    For steps like "in_transit" that can have multiple events (location
+    updates), the checklist always uses:
+      - The canonical step `label`  (e.g. always "In Transit", never "Location Update")
+      - The FIRST event's `timestamp` and `event_id`  (when the step started)
+      - The LAST event's `description`                (most recent location)
+    """
+    current_status = order.status
+
+    # Build two indexes:
+    #   first_event_by_status — the earliest event for each status (step start time)
+    #   last_event_by_status  — the latest event for each status  (most recent description)
+    first_event_by_status = {}
+    last_event_by_status = {}
+    for event in events:
+        s = event.status
+        if s not in first_event_by_status:
+            first_event_by_status[s] = event   # first seen wins
+        last_event_by_status[s] = event         # last seen wins
+
+    checklist = []
+    current_step_found = False
+
+    for step_key, label, completed_statuses in _CHECKLIST_STEPS:
+        matched_status = _STEP_STATUS_MAP[step_key]
+        first_event = first_event_by_status.get(matched_status)
+        last_event  = last_event_by_status.get(matched_status)
+
+        if current_status in completed_statuses:
+            # This step is done — always use the canonical label so "In Transit"
+            # never accidentally becomes "Location Update"
+            checklist.append({
+                'step':        step_key,
+                'label':       label,
+                'state':       'completed',
+                'description': last_event.description if last_event else None,
+                'timestamp':   first_event.timestamp.isoformat() if first_event else None,
+                'event_id':    first_event.id if first_event else None,
+            })
+        elif not current_step_found:
+            # First step not yet completed = the current active step
+            current_step_found = True
+            checklist.append({
+                'step':        step_key,
+                'label':       label,
+                'state':       'current',
+                'description': last_event.description if last_event else None,
+                'timestamp':   None,
+                'event_id':    None,
+            })
+        else:
+            # Future step
+            checklist.append({
+                'step':        step_key,
+                'label':       label,
+                'state':       'pending',
+                'description': None,
+                'timestamp':   None,
+                'event_id':    None,
+            })
+
+    return checklist
+
+
 class OrderTimelineView(GenericAPIView):
     """
     GET /api/v1/orders/{id}/timeline/
+
+    Returns two structures:
+      - `checklist`  — the 6-step lifecycle checklist with state (completed/current/pending)
+      - `events`     — the raw append-only log of ALL events (including location updates)
     """
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        summary="Get shipment status timeline",
+        summary="Get shipment status timeline and checklist",
         responses={
             200: get_envelope_serializer('OrderTimelineResponse', OrderStatusHistorySerializer(many=True)),
         }
@@ -265,9 +379,73 @@ class OrderTimelineView(GenericAPIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        timeline = order.timeline.all()
-        serializer = OrderStatusHistorySerializer(timeline, many=True)
-        return success_response('Timeline retrieved.', data=serializer.data)
+        events = list(order.timeline.all())
+        serialized_events = OrderStatusHistorySerializer(events, many=True).data
+        checklist = _build_checklist(order, events)
+
+        return success_response('Timeline retrieved.', data={
+            'checklist': checklist,
+            'events': serialized_events,
+        })
+
+
+class OrderTimelineEventUpdateView(GenericAPIView):
+    """
+    PATCH /api/v1/orders/timeline/{event_id}/
+
+    Edit the `display_name` or `description` of a specific timeline event.
+    Only dispatchers and admins may update events — senders are read-only.
+    The `status` and `timestamp` fields are immutable.
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = TimelineEventUpdateSerializer
+
+    @extend_schema(
+        summary="Edit a timeline event",
+        request=TimelineEventUpdateSerializer,
+        responses={
+            200: get_envelope_serializer('TimelineEventUpdateResponse', TimelineEventUpdateSerializer()),
+            403: OpenApiResponse(description='Not a dispatcher or admin'),
+            404: OpenApiResponse(description='Event not found'),
+        }
+    )
+    def patch(self, request, event_id, *args, **kwargs):
+        user = request.user
+        if not (user.is_dispatcher or user.is_admin_user):
+            return Response(
+                {'success': False, 'message': 'Only dispatchers and admins can edit timeline events.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            event = OrderStatusHistory.objects.select_related('order').get(pk=event_id)
+        except OrderStatusHistory.DoesNotExist:
+            return Response(
+                {'success': False, 'message': 'Timeline event not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Dispatchers can only edit events on orders assigned to them
+        if user.is_dispatcher and event.order.dispatcher != user:
+            return Response(
+                {'success': False, 'message': 'You are not the assigned dispatcher for this order.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = TimelineEventUpdateSerializer(event, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        logger.info(
+            'Timeline event %s on order %s updated by %s',
+            event_id, event.order.tracking_number, user.email
+        )
+
+        # Return the full updated event
+        return success_response(
+            'Timeline event updated.',
+            data=OrderStatusHistorySerializer(event).data
+        )
 
 
 class OrderMessageListCreateView(GenericAPIView):
@@ -399,7 +577,8 @@ class OrderMessageListCreateView(GenericAPIView):
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        message = serializer.save(order=order, sender=request.user)
+        # Create the message
+        serializer.save(order=order, sender=request.user)
 
         logger.info(
             "Message sent on order %s by %s",
