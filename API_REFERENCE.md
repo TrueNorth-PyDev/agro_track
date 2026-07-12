@@ -94,9 +94,79 @@ Once the truck leaves the farm, the dispatcher tracks it through the system.
 
 As the journey progresses, the dispatcher updates the location and status:
 1. `{"status": "pending_pickup"}` → Timeline logs **"Pickup Confirmed"**.
-2. `{"status": "in_transit", "current_location": "Leaving Ota"}` → Timeline logs **"In Transit"**.
-3. `{"current_location": "Approaching Lagos"}` → Timeline logs **"Location Update"**.
+2. `{"status": "in_transit", "current_location": "Leaving Ota"}` → Timeline logs **"In Transit"** and the checklist advances.
+3. `{"current_location": "Approaching Lagos"}` → Timeline logs an additional **"Location Update"** breadcrumb. The step checklist stays at "In Transit" but updates the description to the latest location.
 4. `{"status": "delivered"}` → Timeline logs **"Delivered"**.
+
+### Viewing the Journey Tracker
+**`GET /orders/{id}/timeline/`**
+
+Returns the timeline in two distinct structures for the UI:
+1. **`checklist`**: A fixed 6-step progress indicator (`Order Placed`, `Dispatcher Assigned`, `Pickup Confirmed`, `In Transit`, `Delivered`, `Completed`). Each step has a `state` (`completed`, `current`, `pending`). This is used to render the top-level progress bar.
+2. **`events`**: The raw, chronological log of all events, including every single location update breadcrumb. This is used to render the scrollable history below the checklist.
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "message": "Timeline retrieved.",
+  "data": {
+    "checklist": [
+      {
+        "step": "order_placed",
+        "label": "Order Placed",
+        "state": "completed",
+        "description": "Order was placed by Sender",
+        "timestamp": "2026-07-08T09:15:00Z",
+        "event_id": 142
+      },
+      {
+        "step": "in_transit",
+        "label": "In Transit",
+        "state": "current",
+        "description": "Approaching Lokoja, Kogi State",
+        "timestamp": null,
+        "event_id": null
+      },
+      {
+        "step": "delivered",
+        "label": "Delivered",
+        "state": "pending",
+        "description": null,
+        "timestamp": null,
+        "event_id": null
+      }
+      // ... other steps omitted for brevity
+    ],
+    "events": [
+      {
+        "id": 154,
+        "title": "Location Update",
+        "description": "Approaching Lokoja, Kogi State",
+        "timestamp": "2026-07-08T16:30:00Z"
+      },
+      {
+        "id": 150,
+        "title": "In Transit",
+        "description": "Truck left the farm en route to destination.",
+        "timestamp": "2026-07-08T11:30:00Z"
+      }
+    ]
+  }
+}
+```
+
+*UI Tip: Map over `data.checklist` to build your 6-step progress bar (switch on `item.state` to pick the correct icon). Map over `data.events` to build the scrollable historical log underneath.*
+
+### Editing Timeline History
+**`PATCH /orders/timeline/{event_id}/`** *(Requires `dispatcher` or `admin` role)*
+
+If a dispatcher makes a typo in a location update, they can edit the description retroactively using the `event_id` returned in the timeline.
+```json
+{
+  "description": "Approaching Lokoja, Kogi State"
+}
+```
 
 ### Public Tracking
 **`GET /public/track/{tracking_number}/`** *(No Auth Required)*
