@@ -19,6 +19,7 @@ from .models import PlatformSettings
 
 User = get_user_model()
 
+
 class AdminDashboardView(GenericAPIView):
     """
     GET /api/v1/admin/dashboard/
@@ -34,28 +35,28 @@ class AdminDashboardView(GenericAPIView):
         active_dispatchers = User.objects.filter(role=User.Role.DISPATCHER, is_active=True).count()
         verified_drivers = Driver.objects.filter(is_verified=True).count()
         fleet_size = Vehicle.objects.count()
-        
+
         # Shipments
         now = timezone.now()
         start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        
+
         this_month_orders = Order.objects.filter(created_at__gte=start_date)
         total_shipments = this_month_orders.count()
-        
+
         # Revenue
         platform_revenue = this_month_orders.aggregate(total=Sum('total_cost'))['total'] or 0.0
-        
+
         # Determine if we should use mock data for growth trend
         all_orders_count = Order.objects.count()
         if all_orders_count < 10:
             months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
             current_month_idx = now.month - 1
             trend_months = []
-            
+
             for i in range(5, -1, -1):
                 idx = (current_month_idx - i) % 12
                 trend_months.append(months[idx])
-                
+
             growth_trend = [
                 {'month': 'Jan', 'users': 10, 'shipments': 15},
                 {'month': 'Feb', 'users': 15, 'shipments': 25},
@@ -64,7 +65,7 @@ class AdminDashboardView(GenericAPIView):
                 {'month': 'May', 'users': 35, 'shipments': 40},
                 {'month': 'Jun', 'users': 42, 'shipments': 48},
             ]
-            
+
             # Map dynamic months
             for i, item in enumerate(growth_trend):
                 if i < len(trend_months):
@@ -72,7 +73,7 @@ class AdminDashboardView(GenericAPIView):
         else:
             # Generate actual trend using DB aggregation
             trend_start = (now.replace(day=1) - timedelta(days=5*32)).replace(day=1)
-            
+
             # Aggregate users by month
             user_counts = list(
                 User.objects.filter(date_joined__gte=trend_start)
@@ -92,7 +93,7 @@ class AdminDashboardView(GenericAPIView):
                 .order_by('month')
             )
             shipments_by_month = {item['month'].strftime('%b'): item['count'] for item in order_counts}
-                
+
             # cumulative sum approx
             months_order = []
             current = trend_start
@@ -102,7 +103,7 @@ class AdminDashboardView(GenericAPIView):
                     months_order.append(m_name)
                 current += timedelta(days=32)
                 current = current.replace(day=1)
-                
+
             growth_trend = []
             cum_u = 0
             for m in months_order[-6:]:
@@ -124,7 +125,7 @@ class AdminDashboardView(GenericAPIView):
             },
             'growth_trend': growth_trend
         }
-        
+
         return success_response('Admin dashboard retrieved', data=data)
 
 
@@ -134,10 +135,10 @@ class AdminUserListView(ListAPIView):
     """
     permission_classes = [IsAdminUser]
     serializer_class = AdminUserSerializer
-    
+
     def get_queryset(self):
         return User.objects.filter(role=User.Role.SENDER).order_by('-date_joined')
-        
+
     @extend_schema(
         summary="List all sender users",
         responses={200: get_envelope_serializer('AdminUserListResponse', AdminUserSerializer(many=True))}
@@ -156,7 +157,7 @@ class AdminUserDetailView(RetrieveUpdateAPIView):
     permission_classes = [IsAdminUser]
     queryset = User.objects.all()
     serializer_class = AdminUserDetailSerializer
-    
+
     @extend_schema(
         summary="Get user details",
         responses={200: get_envelope_serializer('AdminUserDetailResponse', AdminUserDetailSerializer())}
@@ -165,7 +166,7 @@ class AdminUserDetailView(RetrieveUpdateAPIView):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return success_response('User details retrieved', data=serializer.data)
-        
+
     @extend_schema(
         summary="Update user status",
         responses={200: get_envelope_serializer('AdminUserUpdateResponse', AdminUserDetailSerializer())}
@@ -176,7 +177,7 @@ class AdminUserDetailView(RetrieveUpdateAPIView):
             instance.is_active = request.data['is_active']
             instance.save(update_fields=['is_active'])
             return success_response(f"Account {'activated' if instance.is_active else 'suspended'}")
-        
+
         return super().update(request, *args, **kwargs)
 
 
@@ -186,15 +187,15 @@ class AdminDispatcherListView(ListAPIView, CreateAPIView):
     POST /api/v1/admin/dispatchers/
     """
     permission_classes = [IsAdminUser]
-    
+
     def get_serializer_class(self):
         if self.request.method == 'POST':
             return AdminDispatcherCreateSerializer
         return AdminUserSerializer
-    
+
     def get_queryset(self):
         return User.objects.filter(role=User.Role.DISPATCHER).order_by('-date_joined')
-        
+
     @extend_schema(
         summary="List dispatchers",
         responses={200: get_envelope_serializer('AdminDispatcherListResponse', AdminUserSerializer(many=True))}
@@ -203,7 +204,7 @@ class AdminDispatcherListView(ListAPIView, CreateAPIView):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return success_response('Dispatchers retrieved', data=serializer.data)
-        
+
     @extend_schema(
         summary="Create a new dispatcher",
         request=AdminDispatcherCreateSerializer,
@@ -222,13 +223,13 @@ class AdminDispatcherDetailView(RetrieveUpdateAPIView):
     PATCH /api/v1/admin/dispatchers/{id}/
     """
     permission_classes = [IsAdminUser]
-    
+
     def get_queryset(self):
         return User.objects.filter(role=User.Role.DISPATCHER)
-        
+
     def get_serializer_class(self):
         return AdminUserDetailSerializer
-        
+
     @extend_schema(
         summary="Get dispatcher details",
         responses={200: get_envelope_serializer('AdminDispatcherDetailResponse', AdminUserDetailSerializer())}
@@ -237,7 +238,7 @@ class AdminDispatcherDetailView(RetrieveUpdateAPIView):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return success_response('Dispatcher details retrieved', data=serializer.data)
-        
+
     @extend_schema(
         summary="Update dispatcher details",
         responses={200: get_envelope_serializer('AdminDispatcherUpdateResponse', AdminUserDetailSerializer())}
@@ -245,19 +246,19 @@ class AdminDispatcherDetailView(RetrieveUpdateAPIView):
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         updated = False
-        
+
         if 'is_active' in request.data:
             instance.is_active = request.data['is_active']
             updated = True
-        
+
         if 'territory' in request.data:
             instance.territory = request.data['territory']
             updated = True
-            
+
         if updated:
             instance.save(update_fields=['is_active', 'territory'] if 'is_active' in request.data and 'territory' in request.data else ['is_active'] if 'is_active' in request.data else ['territory'])
             return success_response("Dispatcher updated successfully", data=self.get_serializer(instance).data)
-            
+
         return super().update(request, *args, **kwargs)
 
 
@@ -267,15 +268,15 @@ class AdminDriverListView(ListAPIView, CreateAPIView):
     POST /api/v1/admin/drivers/
     """
     permission_classes = [IsAdminUser]
-    
+
     def get_serializer_class(self):
         if self.request.method == 'POST':
             return AdminDriverCreateSerializer
         return AdminDriverSerializer
-        
+
     def get_queryset(self):
         return Driver.objects.all().order_by('-created_at')
-        
+
     @extend_schema(
         summary="List drivers",
         responses={200: get_envelope_serializer('AdminDriverListResponse', AdminDriverSerializer(many=True))}
@@ -284,7 +285,7 @@ class AdminDriverListView(ListAPIView, CreateAPIView):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return success_response('Drivers retrieved', data=serializer.data)
-        
+
     @extend_schema(
         summary="Create driver",
         request=AdminDriverCreateSerializer,
@@ -296,6 +297,7 @@ class AdminDriverListView(ListAPIView, CreateAPIView):
         driver = serializer.save()
         return success_response('Driver created successfully', data=AdminDriverDetailSerializer(driver).data, http_status=status.HTTP_201_CREATED)
 
+
 class AdminDriverDetailView(RetrieveUpdateAPIView):
     """
     GET /api/v1/admin/drivers/{id}/
@@ -303,11 +305,12 @@ class AdminDriverDetailView(RetrieveUpdateAPIView):
     """
     permission_classes = [IsAdminUser]
     serializer_class = AdminDriverDetailSerializer
-    
+    http_method_names = ['get', 'patch', 'head', 'options']  # block PUT
+
     def get_queryset(self):
         from orders.models import Driver
         return Driver.objects.all()
-        
+
     @extend_schema(
         summary="Get driver details",
         responses={200: get_envelope_serializer('AdminDriverDetailResponse', AdminDriverDetailSerializer())}
@@ -316,7 +319,7 @@ class AdminDriverDetailView(RetrieveUpdateAPIView):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return success_response('Driver details retrieved', data=serializer.data)
-        
+
     @extend_schema(
         summary="Update driver details",
         responses={200: get_envelope_serializer('AdminDriverUpdateResponse', AdminDriverDetailSerializer())}
@@ -324,23 +327,26 @@ class AdminDriverDetailView(RetrieveUpdateAPIView):
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         updated = False
-        
+
         if 'is_verified' in request.data:
             instance.is_verified = request.data['is_verified']
             updated = True
-            
+
         if 'is_active' in request.data:
             instance.is_active = request.data['is_active']
             updated = True
-            
+
         if updated:
             fields = []
-            if 'is_verified' in request.data: fields.append('is_verified')
-            if 'is_active' in request.data: fields.append('is_active')
+            if 'is_verified' in request.data:
+                fields.append('is_verified')
+            if 'is_active' in request.data:
+                fields.append('is_active')
             instance.save(update_fields=fields)
             return success_response("Driver updated successfully", data=self.get_serializer(instance).data)
-            
-        return super().update(request, *args, **kwargs)
+
+        return super().update(request, *args, partial=True, **{k: v for k, v in kwargs.items() if k != 'partial'})
+
 
 class AdminVehicleListView(ListAPIView, CreateAPIView):
     """
@@ -349,10 +355,10 @@ class AdminVehicleListView(ListAPIView, CreateAPIView):
     """
     permission_classes = [IsAdminUser]
     serializer_class = AdminVehicleSerializer
-    
+
     def get_queryset(self):
         return Vehicle.objects.select_related('assigned_driver').all().order_by('-id')
-        
+
     @extend_schema(
         summary="List vehicles",
         responses={200: get_envelope_serializer('AdminVehicleListResponse', AdminVehicleSerializer(many=True))}
@@ -361,7 +367,7 @@ class AdminVehicleListView(ListAPIView, CreateAPIView):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return success_response('Vehicles retrieved', data=serializer.data)
-        
+
     @extend_schema(
         summary="Create vehicle",
         request=AdminVehicleSerializer,
@@ -373,6 +379,7 @@ class AdminVehicleListView(ListAPIView, CreateAPIView):
         serializer.save()
         return success_response('Vehicle registered successfully', data=serializer.data, http_status=status.HTTP_201_CREATED)
 
+
 class AdminVehicleDetailView(RetrieveUpdateAPIView):
     """
     GET /api/v1/admin/vehicles/{id}/
@@ -380,10 +387,10 @@ class AdminVehicleDetailView(RetrieveUpdateAPIView):
     """
     permission_classes = [IsAdminUser]
     serializer_class = AdminVehicleSerializer
-    
+
     def get_queryset(self):
         return Vehicle.objects.select_related('assigned_driver').all()
-        
+
     @extend_schema(
         summary="Get vehicle details",
         responses={200: get_envelope_serializer('AdminVehicleDetailResponse', AdminVehicleSerializer())}
@@ -392,7 +399,7 @@ class AdminVehicleDetailView(RetrieveUpdateAPIView):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return success_response('Vehicle details retrieved', data=serializer.data)
-        
+
     @extend_schema(
         summary="Update vehicle details",
         responses={200: get_envelope_serializer('AdminVehicleUpdateResponse', AdminVehicleSerializer())}
@@ -404,6 +411,7 @@ class AdminVehicleDetailView(RetrieveUpdateAPIView):
         serializer.save()
         return success_response("Vehicle updated successfully", data=serializer.data)
 
+
 class PlatformSettingsView(GenericAPIView):
     """
     GET /api/v1/admin/settings/
@@ -411,7 +419,7 @@ class PlatformSettingsView(GenericAPIView):
     """
     permission_classes = [IsAdminUser]
     serializer_class = PlatformSettingsSerializer
-    
+
     @extend_schema(
         summary="Get platform settings",
         responses={200: get_envelope_serializer('PlatformSettingsResponse', PlatformSettingsSerializer())}
@@ -420,7 +428,7 @@ class PlatformSettingsView(GenericAPIView):
         settings = PlatformSettings.get_settings()
         serializer = self.get_serializer(settings)
         return success_response('Platform settings retrieved', data=serializer.data)
-        
+
     @extend_schema(
         summary="Update platform settings",
         request=PlatformSettingsSerializer,
@@ -433,12 +441,13 @@ class PlatformSettingsView(GenericAPIView):
         serializer.save()
         return success_response('Platform settings updated successfully', data=serializer.data)
 
+
 class PlatformAnalyticsView(GenericAPIView):
     """
     GET /api/v1/admin/analytics/
     """
     permission_classes = [IsAdminUser]
-    
+
     @extend_schema(
         tags=['Admin Analytics'],
         summary="Get Platform Analytics",
@@ -451,10 +460,10 @@ class PlatformAnalyticsView(GenericAPIView):
             total_revenue=Sum('total_cost'),
             avg_revenue=Avg('total_cost')
         )
-        
+
         total_rev = stats['total_revenue'] or 0
         avg_rev = stats['avg_revenue'] or 0
-        
+
         # Mocking complex analytics for UI rendering
         data = {
             "kpis": {
@@ -489,5 +498,5 @@ class PlatformAnalyticsView(GenericAPIView):
                 {"month": "Jun", "users": 42}
             ]
         }
-        
+
         return success_response('Platform analytics retrieved', data=data)

@@ -48,7 +48,7 @@ class Command(BaseCommand):
         if not sender.check_password(password):
             sender.set_password(password)
             sender.save()
-            
+
         self.stdout.write(self.style.SUCCESS(f"Created core users (Password: {password})"))
 
         # 2. Create Drivers
@@ -73,15 +73,15 @@ class Command(BaseCommand):
         vehicles = []
         for v in vehicles_data:
             vehicle, _ = Vehicle.objects.get_or_create(
-                registration_number=v["registration_number"], 
+                registration_number=v["registration_number"],
                 defaults={
-                    "vehicle_type": v["vehicle_type"], 
+                    "vehicle_type": v["vehicle_type"],
                     "capacity_tonnes": v["capacity_tonnes"],
                     "status": Vehicle.Status.AVAILABLE
                 }
             )
             vehicles.append(vehicle)
-            
+
         self.stdout.write(self.style.SUCCESS("Created drivers and vehicles"))
 
         # 4. Create Orders
@@ -154,7 +154,7 @@ class Command(BaseCommand):
             estimated_delivery_date=(now + timedelta(days=1)).date(),
             current_location="Currently passing through Lokoja, Kogi State"
         )
-        
+
         # Order 3: Chat History
         OrderMessage.objects.create(
             order=order_in_transit,

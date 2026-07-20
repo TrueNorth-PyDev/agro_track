@@ -23,7 +23,7 @@ from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiRespo
 from django.db.models import Count, Q
 
 from accounts.views import success_response, get_envelope_serializer
-from .models import Order, OrderStatusHistory, Vehicle, Driver
+from .models import Order, OrderStatusHistory, Vehicle, Driver, OrderMessage
 from .serializers import (
     OrderListSerializer,
     OrderDetailSerializer,
@@ -68,7 +68,7 @@ class DashboardView(GenericAPIView):
                 pending=Count('id', filter=Q(status=Order.Status.PENDING_PICKUP)),
                 unassigned=Count('id', filter=Q(status=Order.Status.NEW_REQUEST, driver__isnull=True))
             )
-            
+
             total_shipments = aggs['total']
             active_shipments = aggs['active']
             pending_shipments = aggs['pending']
@@ -606,6 +606,7 @@ class OrderMessageMarkReadView(GenericAPIView):
             "Returns the number of messages that were updated. "
             "Call this when the user opens the chat window."
         ),
+        request=None,
         responses={
             200: OpenApiResponse(description="Messages marked as read"),
             404: OpenApiResponse(description="Order not found or access denied"),
@@ -638,6 +639,89 @@ class OrderMessageMarkReadView(GenericAPIView):
         return success_response(
             f'{updated} message{"s" if updated != 1 else ""} marked as read.',
             data={'marked_read': updated}
+        )
+
+
+class DispatcherInboxView(GenericAPIView):
+    """
+    GET /api/v1/orders/messages/
+
+    Returns every message across all orders where the requesting user is
+    the assigned dispatcher — ordered newest-first.
+
+    Includes:
+      - `total_count`  — total number of messages across all assigned orders
+      - `unread_count` — messages sent by senders that the dispatcher hasn't read yet
+      - `messages`     — flat list of messages, each annotated with the order's
+                         tracking_number and pickup/delivery addresses for context
+
+    Access: Dispatcher or Admin only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Get dispatcher inbox",
+        description=(
+            "Returns all messages across every order assigned to the requesting dispatcher, "
+            "along with total message count and unread count. "
+            "Each message includes the order's tracking number and addresses for context. "
+            "Accessible by dispatchers and admins."
+        ),
+        responses={
+            200: OpenApiResponse(description=(
+                "Inbox payload: `total_count` (int), `unread_count` (int), "
+                "`messages` (list of message objects with order context)."
+            )),
+            403: OpenApiResponse(description="Not a dispatcher or admin"),
+        }
+    )
+    def get(self, request, *args, **kwargs):
+        user = request.user
+
+        # Restrict to dispatcher and admin roles only
+        if not (user.role == user.Role.DISPATCHER or user.is_admin_user):
+            return Response(
+                {'success': False, 'message': 'Only dispatchers and admins can access the inbox.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Fetch all messages on orders this dispatcher is assigned to,
+        # newest first. select_related prevents N+1 on order + sender lookups.
+        messages_qs = (
+            OrderMessage.objects
+            .filter(order__dispatcher=user)
+            .select_related('order', 'sender')
+            .order_by('-timestamp')
+        )
+
+        total_count  = messages_qs.count()
+        unread_count = messages_qs.filter(is_read=False).exclude(sender=user).count()
+
+        messages_data = [
+            {
+                'id':               msg.id,
+                'order_id':         msg.order_id,
+                'tracking_number':  msg.order.tracking_number,
+                'pickup_address':   msg.order.pickup_address,
+                'delivery_address': msg.order.delivery_address,
+                'sender_id':        msg.sender_id,
+                'sender_name':      msg.sender.full_name or msg.sender.email,
+                'sender_initials':  (msg.sender.full_name or msg.sender.email)[0].upper(),
+                'is_own_message':   msg.sender_id == user.id,
+                'content':          msg.content,
+                'is_read':          msg.is_read,
+                'timestamp':        msg.timestamp.isoformat(),
+            }
+            for msg in messages_qs
+        ]
+
+        return success_response(
+            'Dispatcher inbox retrieved.',
+            data={
+                'total_count':  total_count,
+                'unread_count': unread_count,
+                'messages':     messages_data,
+            }
         )
 
 

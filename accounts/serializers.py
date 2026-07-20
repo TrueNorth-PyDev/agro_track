@@ -448,10 +448,10 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'total_shipments'
         )
         read_only_fields = (
-            'id', 'email', 'role', 'is_verified', 'date_joined', 
+            'id', 'email', 'role', 'is_verified', 'date_joined',
             'rating', 'on_time_percentage', 'total_shipments'
         )
-        
+
     @extend_schema_field(serializers.IntegerField())
     def get_total_shipments(self, obj):
         if obj.is_sender:

@@ -1,9 +1,11 @@
 from django.contrib import admin
 from .models import Order, OrderStatusHistory, Driver, Vehicle
 
+
 class OrderStatusHistoryInline(admin.TabularInline):
     model = OrderStatusHistory
     extra = 0
+
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
@@ -13,11 +15,13 @@ class OrderAdmin(admin.ModelAdmin):
     readonly_fields = ('tracking_number', 'created_at', 'updated_at')
     inlines = [OrderStatusHistoryInline]
 
+
 @admin.register(Driver)
 class DriverAdmin(admin.ModelAdmin):
     list_display = ('driver_id', 'name', 'phone', 'is_verified', 'is_active', 'created_at')
     list_filter = ('is_verified', 'is_active')
     search_fields = ('driver_id', 'name', 'phone', 'email')
+
 
 @admin.register(Vehicle)
 class VehicleAdmin(admin.ModelAdmin):

@@ -24,26 +24,22 @@
 ```
 agrotrack/
 ├── accounts/               # Auth & user management
-│   ├── admin.py            # User model registered in Django Admin
 │   ├── managers.py         # Custom UserManager (email-based auth)
 │   ├── models.py           # User, OTPVerification
 │   ├── permissions.py      # RBAC permission classes (IsSender, IsDispatcher, IsAdminUser…)
 │   ├── serializers.py      # All auth business logic + UserProfile
 │   ├── tests.py            # Auth test suite
 │   ├── urls.py             # Mounted at /api/v1/auth/
-│   ├── utils.py            # OTP utils, email helpers, custom exception handler
 │   └── views.py            # API views + OpenAPI annotations
 │
 ├── orders/                 # Order lifecycle, fleet, drivers, reports
-│   ├── admin.py            # Order, Driver, Vehicle registered in Django Admin
 │   ├── models.py           # Order, Driver, Vehicle, OrderStatusHistory, OrderMessage
 │   ├── serializers.py      # OrderCreate, OrderList, OrderDetail, Driver, Vehicle…
-│   ├── tests.py            # Orders & fleet test suite
+│   ├── tests.py            # Orders & fleet test suite (49 tests)
 │   ├── urls.py             # Mounted at /api/v1/orders/
 │   └── views.py            # API views + OpenAPI annotations
 │
 ├── admin_api/              # Admin-only portal endpoints
-│   ├── admin.py            # PlatformSettings registered in Django Admin
 │   ├── models.py           # PlatformSettings (singleton)
 │   ├── serializers.py      # Admin-scoped serializers for users, drivers, vehicles, settings
 │   ├── tests.py            # Admin API test suite
@@ -51,10 +47,11 @@ agrotrack/
 │   └── views.py            # Admin views + OpenAPI annotations
 │
 ├── public_api/             # Unauthenticated public endpoints
+│   ├── geo.py              # Nominatim geocoding + OSRM road distance + Haversine fallback
 │   ├── serializers.py      # PublicTrackingSerializer
-│   ├── tests.py            # Public API test suite
+│   ├── tests.py            # Public API test suite (20 tests)
 │   ├── urls.py             # Mounted at /api/v1/public/
-│   └── views.py            # PublicPlatformStatsView, PublicTrackingView
+│   └── views.py            # PublicPlatformStatsView, PublicTrackingView, PublicCostEstimateView
 │
 ├── agrotrack/
 │   ├── settings.py         # Main settings
@@ -118,7 +115,7 @@ python -c "from django.core.management.utils import get_random_secret_key; print
 ## Running Tests
 
 ```bash
-# Full test suite (79 tests)
+# Full test suite (136 tests)
 python manage.py test --settings=agrotrack.settings_test
 
 # Single app
@@ -174,9 +171,10 @@ When the server is running, interactive docs are available at:
 | GET | `/` | JWT | List shipments |
 | POST | `/` | JWT (Sender) | Create new shipment request |
 | GET / PATCH | `/{id}/` | JWT | Get or update shipment details |
-| GET | `/{id}/timeline/` | JWT | Auto-generated status timeline |
+| GET | `/{id}/timeline/` | JWT | Auto-generated status timeline + checklist |
 | PATCH | `/timeline/{event_id}/` | JWT (Dispatcher/Admin) | Edit timeline event description |
-| GET / POST | `/{id}/messages/` | JWT | Context-aware chat thread |
+| GET | `/messages/` | JWT (Dispatcher/Admin) | Dispatcher inbox — all messages with counts |
+| GET / POST | `/{id}/messages/` | JWT | Order-scoped chat thread |
 | POST | `/{id}/messages/read/` | JWT | Mark incoming messages as read |
 | GET | `/fleet/` | JWT (Dispatcher) | Fleet overview |
 | GET | `/drivers/` | JWT (Dispatcher) | Active drivers for assignment |
@@ -195,7 +193,7 @@ When the server is running, interactive docs are available at:
 | GET / POST | `/dispatchers/` | List dispatchers or create one |
 | GET / PATCH | `/dispatchers/{id}/` | View or update a dispatcher |
 | GET / POST | `/drivers/` | List drivers or register one |
-| GET / PATCH | `/drivers/{id}/` | View or verify a driver |
+| GET / PATCH | `/drivers/{id}/` | View or verify a driver (PATCH only — PUT is blocked) |
 | GET / POST | `/vehicles/` | Fleet registry list or add vehicle |
 | GET / PATCH | `/vehicles/{id}/` | View or update a vehicle |
 | GET / PATCH | `/settings/` | View or update platform settings |
@@ -209,6 +207,97 @@ When the server is running, interactive docs are available at:
 |---|---|---|
 | GET | `/stats/` | Platform statistics for marketing page |
 | GET | `/track/{tracking_number}/` | Track a shipment by its tracking number |
+| POST | `/estimate/` | Calculate shipping cost from plain-text addresses |
+
+---
+
+## Cost Estimation
+
+`POST /api/v1/public/estimate/` calculates a shipping cost without needing the frontend to know the distance in advance.
+
+**How it works:**
+1. The frontend sends two plain-text addresses (e.g. `"Kano City, Kano"` and `"Mile 12 Market, Lagos"`).
+2. The backend geocodes both via **Nominatim** (OpenStreetMap — free, no API key).
+3. The backend calculates the **actual road driving distance** via **OSRM** (free, open-source routing).
+4. If OSRM is unreachable, it falls back to **Haversine straight-line × 1.3** road correction factor.
+5. The distance is applied to the **PlatformSettings pricing formula**:
+
+```
+estimated_cost = (base_rate + distance_km × distance_surcharge_per_km) × priority_multiplier
+```
+
+**Priority multipliers** (set in Admin → Platform Settings):
+| Priority | Multiplier (default) |
+|---|---|
+| `standard` | 1.0× |
+| `express` | 1.5× |
+| `same_day` | 2.0× |
+
+**Request:**
+```json
+{
+  "pickup_address":   "Kano City, Kano State",
+  "delivery_address": "Mile 12 Market, Lagos",
+  "cargo_priority":   "express"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Cost estimate calculated successfully.",
+  "data": {
+    "estimated_cost":      93937.5,
+    "base_rate":           15000.0,
+    "distance_charge":     47625.0,
+    "distance_km":         1058.33,
+    "priority_multiplier": 1.5,
+    "cargo_priority":      "express",
+    "pickup_address":      "Kano City, Kano State",
+    "delivery_address":    "Mile 12 Market, Lagos",
+    "distance_method":     "osrm"
+  }
+}
+```
+
+> `distance_method` is `"osrm"` (real road distance) or `"haversine"` (fallback estimate). The frontend can optionally show a disclaimer when `"haversine"` is returned.
+
+---
+
+## Dispatcher Inbox
+
+`GET /api/v1/orders/messages/` provides a unified inbox view for dispatchers — all messages across all their assigned orders in one call.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Dispatcher inbox retrieved.",
+  "data": {
+    "total_count":  12,
+    "unread_count": 3,
+    "messages": [
+      {
+        "id": 42,
+        "order_id": 18,
+        "tracking_number": "AGT12345678",
+        "pickup_address": "Farm A, Kano",
+        "delivery_address": "Mile 12, Lagos",
+        "sender_id": 5,
+        "sender_name": "Emeka Okafor",
+        "sender_initials": "E",
+        "is_own_message": false,
+        "content": "Is the truck at the farm yet?",
+        "is_read": false,
+        "timestamp": "2026-07-20T08:45:00Z"
+      }
+    ]
+  }
+}
+```
+
+Messages are ordered **newest-first**. `unread_count` only counts messages from senders (not the dispatcher's own sent messages).
 
 ---
 
@@ -285,3 +374,4 @@ All models are registered: **User**, **OTPVerification**, **Order**, **Driver**,
 - **HTTPS**: SSL redirect enforced in production (`SECURE_SSL_REDIRECT=True`)
 - **UUIDs**: User primary keys are UUIDs — no sequential ID leakage
 - **CORS**: Strict origin whitelist via `CORS_ALLOWED_ORIGINS`
+- **PUT blocked on drivers**: Driver detail endpoint only accepts PATCH to prevent accidental field nulling

@@ -70,16 +70,16 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     # Profile & Contact Info
     business_name = models.CharField(_('business name'), max_length=255, blank=True)
-    
+
     # Notification Preferences
     notify_status_updates = models.BooleanField(default=True)
     notify_delivery_confirmation = models.BooleanField(default=True)
     notify_promotions = models.BooleanField(default=False)
-    
+
     # Stats placeholders
     rating = models.DecimalField(max_digits=3, decimal_places=1, default=5.0)
     on_time_percentage = models.IntegerField(default=100)
-    
+
     # Dispatcher Specific
     territory = models.CharField(_('territory'), max_length=255, blank=True)
 

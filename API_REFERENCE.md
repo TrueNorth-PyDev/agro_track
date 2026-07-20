@@ -1,6 +1,6 @@
 # AgroTrack API Reference & Developer Guide
 
-Welcome to the AgroTrack API. This guide explains how everything works together — from the moment a sender registers an account, to the final proof of delivery. 
+Welcome to the AgroTrack API. This guide explains how everything works together — from the moment a sender registers an account, to the final proof of delivery.
 
 **Base URL (local):** `http://localhost:8000/api/v1`  
 **Base URL (production):** `https://<your-app>.up.railway.app/api/v1`
@@ -50,7 +50,7 @@ Senders provide the pickup address, delivery address, cargo details, and contact
   "pickup_date": "2026-07-03"
 }
 ```
-**What happens:** 
+**What happens:**
 - The system generates an 8-character tracking number (e.g., `AGT30459921`).
 - The order status is `new_request`.
 - The Timeline automatically logs an **"Order Placed"** event.
@@ -95,15 +95,25 @@ Once the truck leaves the farm, the dispatcher tracks it through the system.
 As the journey progresses, the dispatcher updates the location and status:
 1. `{"status": "pending_pickup"}` → Timeline logs **"Pickup Confirmed"**.
 2. `{"status": "in_transit", "current_location": "Leaving Ota"}` → Timeline logs **"In Transit"** and the checklist advances.
-3. `{"current_location": "Approaching Lagos"}` → Timeline logs an additional **"Location Update"** breadcrumb. The step checklist stays at "In Transit" but updates the description to the latest location.
+3. `{"current_location": "Approaching Lagos"}` → Timeline logs an additional **"Location Update"** breadcrumb. The step checklist stays at "In Transit" but the description updates to the latest location.
 4. `{"status": "delivered"}` → Timeline logs **"Delivered"**.
 
 ### Viewing the Journey Tracker
 **`GET /orders/{id}/timeline/`**
 
 Returns the timeline in two distinct structures for the UI:
-1. **`checklist`**: A fixed 6-step progress indicator (`Order Placed`, `Dispatcher Assigned`, `Pickup Confirmed`, `In Transit`, `Delivered`, `Completed`). Each step has a `state` (`completed`, `current`, `pending`). This is used to render the top-level progress bar.
-2. **`events`**: The raw, chronological log of all events, including every single location update breadcrumb. This is used to render the scrollable history below the checklist.
+1. **`checklist`**: A fixed 6-step progress indicator. Each step has a `state` property.
+2. **`events`**: The raw, chronological log of all events, including every single location update breadcrumb.
+
+#### Checklist Step States
+
+| `state` | Meaning | Suggested UI |
+|---|---|---|
+| `"completed"` | Step is fully done | ✅ Green checkmark icon |
+| `"current"` | Step is actively in progress | 🔄 Spinning / active icon |
+| `"pending"` | Step not yet reached | ⬜ Greyed-out circle |
+
+The 6 fixed steps in order: `order_placed` → `assigned` → `pending_pickup` → `in_transit` → `delivered` → `completed`.
 
 **Example Response:**
 ```json
@@ -136,7 +146,6 @@ Returns the timeline in two distinct structures for the UI:
         "timestamp": null,
         "event_id": null
       }
-      // ... other steps omitted for brevity
     ],
     "events": [
       {
@@ -156,7 +165,7 @@ Returns the timeline in two distinct structures for the UI:
 }
 ```
 
-*UI Tip: Map over `data.checklist` to build your 6-step progress bar (switch on `item.state` to pick the correct icon). Map over `data.events` to build the scrollable historical log underneath.*
+> **UI Tip:** Map over `data.checklist` to render the 6-step progress bar (switch on `item.state` for icons). Map over `data.events` for the scrollable breadcrumb history beneath it.
 
 ### Editing Timeline History
 **`PATCH /orders/timeline/{event_id}/`** *(Requires `dispatcher` or `admin` role)*
@@ -179,12 +188,11 @@ Anyone with the `AGT...` tracking number can hit this endpoint to get the live l
 
 During the journey, the Sender and the assigned Dispatcher can message each other directly.
 
-### Fetching the Thread
+### Order-Scoped Thread
 **`GET /orders/{id}/messages/`**
 
-Returns the chat history, the number of unread messages, and `chat_info` identifying the other party (with their initials for UI avatars). Access is strictly limited to the sender and the assigned dispatcher.
+Returns the chat history for a single order, the unread count, and `chat_info` identifying the other party (with initials for UI avatars). Access is strictly limited to the sender and the assigned dispatcher.
 
-### Sending a Message
 **`POST /orders/{id}/messages/`**
 ```json
 {
@@ -192,9 +200,46 @@ Returns the chat history, the number of unread messages, and `chat_info` identif
 }
 ```
 
-### Reading Messages
 **`POST /orders/{id}/messages/read/`**
+
 When the user opens the chat UI, call this endpoint. It bulk-updates all incoming messages from the other party to `is_read = true`, clearing the unread badge.
+
+### Dispatcher Inbox (All Orders)
+**`GET /orders/messages/`** *(Requires `dispatcher` or `admin` role)*
+
+Returns every message across **all** orders assigned to the requesting dispatcher in a flat, newest-first list — perfect for a notification inbox panel.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Dispatcher inbox retrieved.",
+  "data": {
+    "total_count": 12,
+    "unread_count": 3,
+    "messages": [
+      {
+        "id": 42,
+        "order_id": 18,
+        "tracking_number": "AGT12345678",
+        "pickup_address": "Farm A, Kano",
+        "delivery_address": "Mile 12, Lagos",
+        "sender_id": 5,
+        "sender_name": "Emeka Okafor",
+        "sender_initials": "E",
+        "is_own_message": false,
+        "content": "Is the truck at the farm yet?",
+        "is_read": false,
+        "timestamp": "2026-07-20T08:45:00Z"
+      }
+    ]
+  }
+}
+```
+
+> `unread_count` only counts messages from senders — not the dispatcher's own sent messages.
+> `is_own_message` drives left/right bubble placement in a chat-style inbox UI.
+> Each message carries `tracking_number` + addresses so the frontend can link directly to the order without an extra API call.
 
 ---
 
@@ -228,8 +273,73 @@ The `/admin/` endpoints are restricted strictly to users with `role = admin`.
 
 - **Platform Setup**: Register new fleet vehicles (`POST /admin/vehicles/`) and drivers (`POST /admin/drivers/`).
 - **User Management**: View or suspend sender accounts (`PATCH /admin/users/{id}/`).
-- **Global Settings**: Configure platform-wide rules via the singleton settings `PATCH /admin/settings/`.
+- **Global Settings**: Configure platform-wide pricing and notification rules via the singleton settings `GET|PATCH /admin/settings/`.
 - **Deep Analytics**: Fetch revenue graphs, regional distribution, and user acquisition metrics (`GET /admin/analytics/`).
+
+> **Note on Driver Updates:** Use `PATCH /admin/drivers/{id}/` only — `PUT` is intentionally blocked to prevent accidentally nulling out fields. Only send the fields you want to change.
+
+---
+
+## 8. Cost Estimation (No Auth Required)
+
+**`POST /public/estimate/`**
+
+Calculates a shipping cost estimate from two plain-text addresses. No coordinates or distance knowledge needed from the frontend.
+
+### How It Works
+1. Both addresses are geocoded via **Nominatim** (OpenStreetMap — free, no API key needed).
+2. Road driving distance is calculated via **OSRM** (free, open-source routing engine).
+3. If OSRM is unreachable, the backend falls back to **Haversine straight-line × 1.3** road correction.
+4. The distance is applied to the platform's pricing formula:
+
+```
+estimated_cost = (base_rate + distance_km × distance_surcharge_per_km) × priority_multiplier
+```
+
+### Priority Multipliers (configured in Admin → Platform Settings)
+
+| `cargo_priority` | Default Multiplier |
+|---|---|
+| `standard` | 1.0× |
+| `express` | 1.5× |
+| `same_day` | 2.0× |
+
+### Request
+```json
+{
+  "pickup_address":   "Kano City, Kano State",
+  "delivery_address": "Mile 12 Market, Lagos",
+  "cargo_priority":   "express"
+}
+```
+
+### Response
+```json
+{
+  "success": true,
+  "message": "Cost estimate calculated successfully.",
+  "data": {
+    "estimated_cost":      93937.5,
+    "base_rate":           15000.0,
+    "distance_charge":     47625.0,
+    "distance_km":         1058.33,
+    "priority_multiplier": 1.5,
+    "cargo_priority":      "express",
+    "pickup_address":      "Kano City, Kano State",
+    "delivery_address":    "Mile 12 Market, Lagos",
+    "distance_method":     "osrm"
+  }
+}
+```
+
+| Field | Description |
+|---|---|
+| `distance_method` | `"osrm"` = real road routing \| `"haversine"` = straight-line fallback |
+| `distance_km` | Calculated road distance in kilometres |
+| `distance_charge` | `distance_km × distance_surcharge_per_km` |
+| `estimated_cost` | Final billable estimate after multiplier |
+
+> **Error Handling:** If an address can't be geocoded, the API returns `400` with a descriptive message. If the geocoding service is completely down, it returns `503`. The frontend should always handle both gracefully.
 
 ---
 
@@ -239,11 +349,26 @@ All API responses follow this consistent structure, making it easy for the front
 
 ```json
 {
-  "success": true, // or false
+  "success": true,
   "message": "Human readable status message",
-  "data": { ... }, // Omitted on error
-  "errors": {      // Omitted on success
+  "data": { },
+  "errors": {
     "field_name": ["Specific validation error"]
   }
 }
 ```
+
+> `data` is omitted on error responses. `errors` is omitted on success responses.
+
+---
+
+## Appendix: Order Status Flow
+
+```
+new_request → assigned → pending_pickup → in_transit → delivered → completed
+                                                     ↑
+                                          (location updates append here
+                                           as extra events, not new statuses)
+```
+
+Any status can transition to `cancelled` at any point.

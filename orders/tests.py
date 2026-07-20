@@ -552,3 +552,182 @@ class ChatSystemTests(APITestCase):
         self.client.force_authenticate(user=self.other_dispatcher)
         response = self.client.post(self.mark_read_url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher Inbox Tests
+# ---------------------------------------------------------------------------
+
+INBOX_URL = '/api/v1/orders/messages/'
+
+
+def _make_order(sender, dispatcher=None, **kwargs):
+    defaults = dict(
+        pickup_address='Farm A, Kano',
+        pickup_contact_name='Dan',
+        pickup_phone='0800000001',
+        delivery_address='Mile 12, Lagos',
+        delivery_name='Ola',
+        delivery_phone='0800000002',
+        cargo_type='Tomatoes',
+        cargo_weight=200,
+        cargo_value=50000,
+    )
+    defaults.update(kwargs)
+    order = Order.objects.create(sender=sender, dispatcher=dispatcher, **defaults)
+    return order
+
+
+class DispatcherInboxTests(APITestCase):
+
+    def setUp(self):
+        # Users
+        self.sender = User.objects.create_user(
+            email='inbox_sender@example.com', password='pass', full_name='Inbox Sender',
+            is_active=True, is_verified=True, role=User.Role.SENDER,
+        )
+        self.dispatcher = User.objects.create_user(
+            email='inbox_dispatcher@example.com', password='pass', full_name='Inbox Dispatcher',
+            is_active=True, is_verified=True, role=User.Role.DISPATCHER,
+        )
+        self.other_dispatcher = User.objects.create_user(
+            email='other_inbox_dispatcher@example.com', password='pass',
+            is_active=True, is_verified=True, role=User.Role.DISPATCHER,
+        )
+        self.admin = User.objects.create_user(
+            email='inbox_admin@example.com', password='pass', full_name='Admin',
+            is_active=True, is_verified=True, role=User.Role.ADMIN,
+        )
+
+        # One order assigned to our dispatcher
+        self.order1 = _make_order(self.sender, dispatcher=self.dispatcher)
+        # A second order also assigned to our dispatcher
+        self.order2 = _make_order(
+            self.sender, dispatcher=self.dispatcher,
+            pickup_address='Kaduna City', delivery_address='Abuja, FCT'
+        )
+        # An order assigned to a different dispatcher (should NOT appear)
+        self.order_other = _make_order(self.sender, dispatcher=self.other_dispatcher)
+
+    # ── Access control ────────────────────────────────────────────────────
+
+    def test_sender_cannot_access_inbox(self):
+        self.client.force_authenticate(user=self.sender)
+        response = self.client.get(INBOX_URL)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unauthenticated_cannot_access_inbox(self):
+        response = self.client.get(INBOX_URL)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_dispatcher_can_access_inbox(self):
+        self.client.force_authenticate(user=self.dispatcher)
+        response = self.client.get(INBOX_URL)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_admin_can_access_inbox(self):
+        # Admin should see all messages across all orders they're assigned to
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.get(INBOX_URL)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    # ── Empty inbox ───────────────────────────────────────────────────────
+
+    def test_empty_inbox_returns_zero_counts(self):
+        self.client.force_authenticate(user=self.dispatcher)
+        response = self.client.get(INBOX_URL)
+        data = response.data['data']
+        self.assertEqual(data['total_count'], 0)
+        self.assertEqual(data['unread_count'], 0)
+        self.assertEqual(data['messages'], [])
+
+    # ── Message counts ────────────────────────────────────────────────────
+
+    def test_total_count_includes_all_assigned_orders(self):
+        # 2 messages on order1, 1 message on order2
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Hello from order 1')
+        OrderMessage.objects.create(order=self.order1, sender=self.dispatcher, content='Got it')
+        OrderMessage.objects.create(order=self.order2, sender=self.sender, content='Hello from order 2')
+
+        self.client.force_authenticate(user=self.dispatcher)
+        response = self.client.get(INBOX_URL)
+        data = response.data['data']
+        self.assertEqual(data['total_count'], 3)
+
+    def test_unread_count_excludes_own_messages(self):
+        # 2 unread from sender, 1 from dispatcher (own — should NOT count)
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Msg 1', is_read=False)
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Msg 2', is_read=False)
+        OrderMessage.objects.create(order=self.order1, sender=self.dispatcher, content='My reply', is_read=False)
+
+        self.client.force_authenticate(user=self.dispatcher)
+        response = self.client.get(INBOX_URL)
+        self.assertEqual(response.data['data']['unread_count'], 2)
+
+    def test_read_messages_not_counted_as_unread(self):
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Msg', is_read=True)
+
+        self.client.force_authenticate(user=self.dispatcher)
+        response = self.client.get(INBOX_URL)
+        self.assertEqual(response.data['data']['unread_count'], 0)
+        self.assertEqual(response.data['data']['total_count'], 1)
+
+    def test_messages_from_other_dispatcher_orders_not_included(self):
+        # Message on order assigned to other_dispatcher — should NOT appear
+        OrderMessage.objects.create(order=self.order_other, sender=self.sender, content='Private')
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Mine')
+
+        self.client.force_authenticate(user=self.dispatcher)
+        response = self.client.get(INBOX_URL)
+        self.assertEqual(response.data['data']['total_count'], 1)
+
+    # ── Response shape ────────────────────────────────────────────────────
+
+    def test_message_has_all_required_fields(self):
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Test message')
+
+        self.client.force_authenticate(user=self.dispatcher)
+        response = self.client.get(INBOX_URL)
+        msg = response.data['data']['messages'][0]
+
+        required = [
+            'id', 'order_id', 'tracking_number', 'pickup_address',
+            'delivery_address', 'sender_id', 'sender_name',
+            'sender_initials', 'is_own_message', 'content', 'is_read', 'timestamp',
+        ]
+        for field in required:
+            self.assertIn(field, msg, f"Missing field: {field}")
+
+    def test_is_own_message_true_for_dispatcher_messages(self):
+        OrderMessage.objects.create(order=self.order1, sender=self.dispatcher, content='I sent this')
+
+        self.client.force_authenticate(user=self.dispatcher)
+        response = self.client.get(INBOX_URL)
+        msg = response.data['data']['messages'][0]
+        self.assertTrue(msg['is_own_message'])
+
+    def test_is_own_message_false_for_sender_messages(self):
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Sender sent this')
+
+        self.client.force_authenticate(user=self.dispatcher)
+        response = self.client.get(INBOX_URL)
+        msg = response.data['data']['messages'][0]
+        self.assertFalse(msg['is_own_message'])
+
+    def test_messages_ordered_newest_first(self):
+        m1 = OrderMessage.objects.create(order=self.order1, sender=self.sender, content='First')
+        m2 = OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Second')
+
+        self.client.force_authenticate(user=self.dispatcher)
+        response = self.client.get(INBOX_URL)
+        messages = response.data['data']['messages']
+        self.assertEqual(messages[0]['id'], m2.id)
+        self.assertEqual(messages[1]['id'], m1.id)
+
+    def test_tracking_number_included_in_message(self):
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Hi')
+
+        self.client.force_authenticate(user=self.dispatcher)
+        response = self.client.get(INBOX_URL)
+        msg = response.data['data']['messages'][0]
+        self.assertEqual(msg['tracking_number'], self.order1.tracking_number)

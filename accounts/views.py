@@ -68,7 +68,7 @@ def get_envelope_serializer(name: str, data_serializer=None):
     }
     if data_serializer:
         fields['data'] = data_serializer
-    
+
     return inline_serializer(name=name, fields=fields)
 
 BasicEnvelope = get_envelope_serializer('BasicEnvelope')
@@ -105,7 +105,7 @@ class RegisterView(GenericAPIView):
         user = serializer.save()
 
         logger.info('New user registered (OTP bypassed): %s', user.email)
-        
+
         refresh = RefreshToken.for_user(user)
         token_data = {
             'access': str(refresh.access_token),

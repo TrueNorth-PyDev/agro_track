@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
+
 class AdminAPITests(APITestCase):
     def setUp(self):
         self.admin = User.objects.create_user(
@@ -17,14 +18,14 @@ class AdminAPITests(APITestCase):
             email='disp@test.com', password='TestPass2!', role=User.Role.DISPATCHER, full_name='Test Disp', territory='South'
         )
         self.client.force_authenticate(user=self.admin)
-        
+
     def test_dashboard_access(self):
         url = reverse('admin_api:dashboard')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('overview_metrics', response.data['data'])
         self.assertIn('growth_trend', response.data['data'])
-        
+
     def test_user_list(self):
         url = reverse('admin_api:user-list')
         response = self.client.get(url)
@@ -32,21 +33,21 @@ class AdminAPITests(APITestCase):
         # Should only list SENDER roles
         self.assertEqual(len(response.data['data']), 1)
         self.assertEqual(response.data['data'][0]['email'], 'sender@test.com')
-        
+
     def test_suspend_user(self):
         url = reverse('admin_api:user-detail', kwargs={'pk': self.sender.id})
         response = self.client.patch(url, {'is_active': False})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.sender.refresh_from_db()
         self.assertFalse(self.sender.is_active)
-        
+
     def test_dispatcher_list(self):
         url = reverse('admin_api:dispatcher-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['data']), 1)
         self.assertEqual(response.data['data'][0]['territory'], 'South')
-        
+
     def test_create_dispatcher(self):
         url = reverse('admin_api:dispatcher-list')
         response = self.client.post(url, {
@@ -57,7 +58,7 @@ class AdminAPITests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(User.objects.filter(email='newdisp@test.com').exists())
-        
+
     def test_update_dispatcher_territory(self):
         url = reverse('admin_api:dispatcher-detail', kwargs={'pk': self.dispatcher.id})
         response = self.client.patch(url, {'territory': 'East'})
