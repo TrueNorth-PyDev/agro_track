@@ -5,7 +5,7 @@ from .views import (
     OrderMessageListCreateView, OrderMessageMarkReadView,
     DispatcherInboxView,
     FleetOverviewView, DriverListView, VehicleListView,
-    ReportsView
+    ReportsView, ReviewCreateView
 )
 
 app_name = 'orders'
@@ -23,4 +23,5 @@ urlpatterns = [
     path('messages/', DispatcherInboxView.as_view(), name='dispatcher-inbox'),
     path('<int:pk>/messages/', OrderMessageListCreateView.as_view(), name='order-messages'),
     path('<int:pk>/messages/read/', OrderMessageMarkReadView.as_view(), name='order-messages-mark-read'),
+    path('<int:pk>/rate/', ReviewCreateView.as_view(), name='order-rate'),
 ]

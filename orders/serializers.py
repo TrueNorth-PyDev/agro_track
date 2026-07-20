@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
-from .models import Order, Driver, Vehicle, OrderStatusHistory, OrderMessage
+from .models import Order, Driver, Vehicle, OrderStatusHistory, OrderMessage, Review
 
 
 ACTIVE_ORDER_STATUSES = [
@@ -187,3 +187,18 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         """Automatically assign the logged-in user as the sender."""
         validated_data['sender'] = self.context['request'].user
         return super().create(validated_data)
+
+
+class ReviewSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating a review on a completed order.
+    """
+    class Meta:
+        model = Review
+        fields = ('id', 'rating', 'comment', 'timestamp')
+        read_only_fields = ('id', 'timestamp')
+
+    def validate_rating(self, value):
+        if not (1 <= value <= 5):
+            raise serializers.ValidationError("Rating must be between 1 and 5.")
+        return value

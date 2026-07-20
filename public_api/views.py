@@ -8,7 +8,7 @@ from rest_framework.generics import RetrieveAPIView
 from accounts.views import success_response, get_envelope_serializer
 from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer
 
-from orders.models import Order
+from orders.models import Order, Review
 from admin_api.models import PlatformSettings
 from .serializers import PublicTrackingSerializer
 from .geo import resolve_distance
@@ -190,12 +190,16 @@ class PublicPlatformStatsView(APIView):
         }))}
     )
     def get(self, request, *args, **kwargs):
+        from django.db.models import Avg
         deliveries_completed = Order.objects.filter(status=Order.Status.COMPLETED).count()
+        
+        avg_rating = Review.objects.aggregate(Avg('rating'))['rating__avg']
+        rating_str = f"{avg_rating:.1f} / 5" if avg_rating is not None else "5.0 / 5"
 
         data = {
             "deliveries_completed": deliveries_completed if deliveries_completed > 500 else "500+",
             "states_served": "32+",       # Updated periodically as coverage expands
-            "customer_rating": "4.8 / 5", # Aggregated from driver ratings
+            "customer_rating": rating_str,
         }
 
         return success_response('Platform stats retrieved.', data=data)

@@ -401,3 +401,38 @@ class OrderMessage(models.Model):
 
     def __str__(self):
         return f"Message on {self.order.tracking_number} by {self.sender}"
+
+
+class Review(models.Model):
+    """
+    A sender's rating and feedback for a completed order and its driver.
+    """
+    order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='review')
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    driver = models.ForeignKey(Driver, on_delete=models.CASCADE, related_name='reviews')
+    rating = models.IntegerField(
+        help_text="Rating from 1 to 5 stars"
+    )
+    comment = models.TextField(blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(rating__gte=1, rating__lte=5),
+                name='rating_range_1_to_5'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.rating} stars for {self.driver.name} (Order {self.order.tracking_number})"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Update driver average rating
+        avg = self.driver.reviews.aggregate(models.Avg('rating'))['rating__avg']
+        if avg is not None:
+            self.driver.rating = round(avg, 1)
+            self.driver.save(update_fields=['rating'])
+

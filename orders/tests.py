@@ -2,7 +2,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 from accounts.models import User
-from .models import Order, Driver, Vehicle, OrderStatusHistory, OrderMessage
+from .models import Order, Driver, Vehicle, OrderStatusHistory, OrderMessage, Review
 
 
 def make_user(email='test@example.com', verified=True):
@@ -731,3 +731,69 @@ class DispatcherInboxTests(APITestCase):
         response = self.client.get(INBOX_URL)
         msg = response.data['data']['messages'][0]
         self.assertEqual(msg['tracking_number'], self.order1.tracking_number)
+
+
+class ReviewTests(APITestCase):
+    def setUp(self):
+        self.sender = User.objects.create_user(
+            email='sender@example.com', password='pass',
+            is_active=True, is_verified=True, role=User.Role.SENDER
+        )
+        self.other_sender = User.objects.create_user(
+            email='other@example.com', password='pass',
+            is_active=True, is_verified=True, role=User.Role.SENDER
+        )
+        self.driver = Driver.objects.create(name="Driver Bob", rating=0.0)
+        self.order = _make_order(self.sender)
+        self.order.driver = self.driver
+        self.order.status = Order.Status.COMPLETED
+        self.order.save()
+        
+        self.url = reverse('orders:order-rate', kwargs={'pk': self.order.pk})
+
+    def test_rate_completed_order_success(self):
+        self.client.force_authenticate(user=self.sender)
+        data = {'rating': 5, 'comment': 'Great driver!'}
+        res = self.client.post(self.url, data)
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Review.objects.count(), 1)
+        
+        self.driver.refresh_from_db()
+        self.assertEqual(self.driver.rating, 5.0)
+
+    def test_rate_updates_driver_average(self):
+        self.client.force_authenticate(user=self.sender)
+        self.client.post(self.url, {'rating': 5})
+        
+        # Another order for the same driver, rated 3
+        order2 = _make_order(self.sender)
+        order2.driver = self.driver
+        order2.status = Order.Status.COMPLETED
+        order2.save()
+        
+        url2 = reverse('orders:order-rate', kwargs={'pk': order2.pk})
+        self.client.post(url2, {'rating': 3})
+        
+        self.driver.refresh_from_db()
+        self.assertEqual(self.driver.rating, 4.0)
+
+    def test_cannot_rate_uncompleted_order(self):
+        self.order.status = Order.Status.IN_TRANSIT
+        self.order.save()
+        self.client.force_authenticate(user=self.sender)
+        res = self.client.post(self.url, {'rating': 4})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("only rate completed orders", str(res.data))
+
+    def test_cannot_rate_other_peoples_order(self):
+        self.client.force_authenticate(user=self.other_sender)
+        res = self.client.post(self.url, {'rating': 4})
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_cannot_rate_twice(self):
+        self.client.force_authenticate(user=self.sender)
+        self.client.post(self.url, {'rating': 4})
+        res = self.client.post(self.url, {'rating': 5})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("already rated", str(res.data))
+

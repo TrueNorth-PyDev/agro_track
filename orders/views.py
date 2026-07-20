@@ -14,6 +14,7 @@ from collections import defaultdict
 from datetime import timedelta
 
 from django.utils import timezone
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
@@ -23,6 +24,7 @@ from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiRespo
 from django.db.models import Count, Q
 
 from accounts.views import success_response, get_envelope_serializer
+from accounts.permissions import IsSender, IsDispatcherOrAdmin
 from .models import Order, OrderStatusHistory, Vehicle, Driver, OrderMessage
 from .serializers import (
     OrderListSerializer,
@@ -33,6 +35,7 @@ from .serializers import (
     OrderMessageSerializer,
     VehicleSerializer,
     DriverSerializer,
+    ReviewSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -926,3 +929,44 @@ class ReportsView(GenericAPIView):
         }
 
         return success_response('Analytics retrieved successfully.', data=data)
+
+
+class ReviewCreateView(GenericAPIView):
+    """
+    POST /api/v1/orders/{id}/rate/
+
+    Allows the sender of a COMPLETED order to submit a rating (1-5) and comment.
+    """
+    permission_classes = [IsAuthenticated, IsSender]
+    serializer_class = ReviewSerializer
+
+    @extend_schema(
+        operation_id='order_create_review',
+        summary="Rate a completed shipment",
+        description=(
+            "Allows the sender of a completed order to submit a rating and comment. "
+            "The driver's average rating is automatically updated."
+        ),
+        responses={
+            201: OpenApiResponse(description="Review submitted successfully"),
+            400: OpenApiResponse(description="Validation error (e.g. order not completed, already rated)"),
+            404: OpenApiResponse(description="Order not found"),
+        }
+    )
+    def post(self, request, pk):
+        order = get_object_or_404(Order, id=pk, sender=request.user)
+
+        if order.status != Order.Status.COMPLETED:
+            return Response({'success': False, 'errors': {'order': ['You can only rate completed orders.']}}, status=status.HTTP_400_BAD_REQUEST)
+
+        if hasattr(order, 'review'):
+            return Response({'success': False, 'errors': {'order': ['You have already rated this order.']}}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not order.driver:
+            return Response({'success': False, 'errors': {'order': ['This order has no driver assigned to rate.']}}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(order=order, sender=request.user, driver=order.driver)
+            return success_response('Review submitted successfully.', data=serializer.data, http_status=status.HTTP_201_CREATED)
+        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)

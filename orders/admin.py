@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Order, OrderStatusHistory, Driver, Vehicle
+from .models import Order, OrderStatusHistory, Driver, Vehicle, Review
 
 
 class OrderStatusHistoryInline(admin.TabularInline):
@@ -28,3 +28,11 @@ class VehicleAdmin(admin.ModelAdmin):
     list_display = ('registration_number', 'vehicle_type', 'make_model', 'status', 'assigned_driver')
     list_filter = ('vehicle_type', 'status')
     search_fields = ('registration_number', 'make_model')
+
+
+@admin.register(Review)
+class ReviewAdmin(admin.ModelAdmin):
+    list_display = ('order', 'driver', 'rating', 'sender', 'timestamp')
+    list_filter = ('rating', 'timestamp')
+    search_fields = ('order__tracking_number', 'driver__name', 'sender__email')
+    readonly_fields = ('timestamp',)

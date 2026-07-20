@@ -50,6 +50,37 @@ class PublicAPITests(APITestCase):
         self.assertIn('deliveries_completed', response.data['data'])
         self.assertEqual(response.data['data']['deliveries_completed'], '500+')
         self.assertEqual(response.data['data']['states_served'], '32+')
+        self.assertEqual(response.data['data']['customer_rating'], '5.0 / 5')
+
+    def test_get_public_stats_calculates_average_rating(self):
+        from orders.models import Review, Driver
+        driver = Driver.objects.create(name="Driver 1")
+        self.order.driver = driver
+        self.order.save()
+        
+        # Add reviews
+        Review.objects.create(order=self.order, sender=self.sender, driver=driver, rating=3)
+        
+        # Need a second order for a second review
+        order2 = Order.objects.create(
+            sender=self.sender,
+            pickup_address='A',
+            pickup_contact_name='A',
+            pickup_phone='123',
+            delivery_address='B',
+            delivery_name='B',
+            delivery_phone='123',
+            cargo_type='Test',
+            cargo_weight=100.0,
+            cargo_value=100.0,
+            driver=driver
+        )
+        Review.objects.create(order=order2, sender=self.sender, driver=driver, rating=4)
+        
+        url = reverse('public_api:stats')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['data']['customer_rating'], '3.5 / 5')
 
     def test_get_public_tracking(self):
         url = reverse('public_api:track', kwargs={'tracking_number': self.order.tracking_number})
