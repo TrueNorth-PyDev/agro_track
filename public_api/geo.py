@@ -57,7 +57,7 @@ def _fetch_json(url: str, description: str) -> Optional[dict]:
             url,
             headers={
                 # Nominatim requires a descriptive User-Agent per their ToS.
-                "User-Agent": "AgroTrack/1.0 (agro-logistics platform; contact@agrotrack.ng)",
+                "User-Agent": "AgroTrack/1.0 (ephraim.e@truenorthglobalsolutions.com)",
                 "Accept": "application/json",
             },
         )
