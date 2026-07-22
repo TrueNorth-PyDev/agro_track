@@ -178,6 +178,7 @@ When the server is running, interactive docs are available at:
 | GET / POST | `/{id}/messages/` | JWT | Order-scoped chat thread |
 | POST | `/{id}/messages/read/` | JWT | Mark messages in a specific chat as read |
 | POST | `/{id}/rate/` | JWT (Sender) | Rate a completed shipment (1–5 stars) |
+| POST | `/{id}/pod/` | JWT (Dispatcher/Admin) | Upload proof of delivery image & complete order |
 | GET | `/fleet/` | JWT (Dispatcher) | Fleet overview |
 | GET | `/drivers/` | JWT (Dispatcher) | Active drivers for assignment |
 | GET | `/vehicles/` | JWT (Dispatcher) | Vehicles for assignment |

@@ -238,3 +238,26 @@ class ReviewSerializer(serializers.ModelSerializer):
         if not (1 <= value <= 5):
             raise serializers.ValidationError("Rating must be between 1 and 5.")
         return value
+
+
+class PODUploadSerializer(serializers.Serializer):
+    """
+    Serializer for the dedicated Proof of Delivery upload endpoint.
+
+    Accepts a single image file (`proof_of_delivery`) and validates:
+      - The file is present.
+      - The file is a valid image format (JPEG, PNG, WEBP, GIF — enforced by ImageField).
+      - The file does not exceed 10 MB.
+    """
+    proof_of_delivery = serializers.ImageField(
+        help_text="Signed waybill or delivery confirmation photo (JPEG/PNG/WEBP, max 10 MB)."
+    )
+
+    def validate_proof_of_delivery(self, image):
+        max_mb = 10
+        if image.size > max_mb * 1024 * 1024:
+            raise serializers.ValidationError(
+                f"Image file too large. Maximum allowed size is {max_mb} MB "
+                f"(uploaded: {image.size / (1024 * 1024):.1f} MB)."
+            )
+        return image

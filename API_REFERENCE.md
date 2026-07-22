@@ -357,13 +357,33 @@ Every order — in both the list and detail endpoints — now carries its own `r
 When the goods arrive and are signed for, the dispatcher uploads the signed waybill to close out the order.
 
 ### Uploading the POD
-**`PATCH /orders/{id}/`** *(Must be sent as `multipart/form-data`)*
+**`POST /orders/{id}/pod/`** *(Requires `dispatcher` or `admin` role, sent as `multipart/form-data`)*
 
-- Set `status` to `completed`
-- Attach the image file to the `proof_of_delivery` field.
+Uploads the proof of delivery image and automatically advances the order status to `completed`.
 
-**What happens:**
-- The image is saved to the configured AWS S3 bucket.
+**Validation Rules:**
+- The order must currently be in `delivered` status.
+- The user must be the dispatcher assigned to this specific order (admins are exempt).
+- The image must be a valid format (JPEG, PNG, WEBP) and under 10 MB.
+
+**Form Data:**
+| Field | Type | Description |
+|---|---|---|
+| `proof_of_delivery` | File | The image file (max 10MB) |
+
+**Success Response (`200 OK`):**
+```json
+{
+  "success": true,
+  "message": "Proof of delivery uploaded successfully. Order is now completed.",
+  "data": {
+    "order_id": 18,
+    "tracking_number": "AGT12345678",
+    "status": "completed",
+    "proof_of_delivery": "http://localhost:8000/media/pod/waybill_18.jpg"
+  }
+}
+```
 - The Timeline logs the final **"Completed"** event.
 - The order drops off the active queue.
 

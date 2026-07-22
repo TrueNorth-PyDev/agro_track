@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import (
-    DashboardView, OrderListView, OrderDetailView,
+    DashboardView, OrderListView, OrderDetailView, PODUploadView,
     OrderTimelineView, OrderTimelineEventUpdateView,
     OrderMessageListCreateView, OrderMessageMarkReadView,
     DispatcherInboxView, DispatcherUnreadView,
@@ -19,6 +19,7 @@ urlpatterns = [
     path('timeline/<int:event_id>/', OrderTimelineEventUpdateView.as_view(), name='timeline-event-update'),
     path('', OrderListView.as_view(), name='order-list'),
     path('<int:pk>/', OrderDetailView.as_view(), name='order-detail'),
+    path('<int:pk>/pod/', PODUploadView.as_view(), name='order-pod-upload'),
     path('<int:pk>/timeline/', OrderTimelineView.as_view(), name='order-timeline'),
     path('messages/', DispatcherInboxView.as_view(), name='dispatcher-inbox'),
     path('messages/unread/', DispatcherUnreadView.as_view(), name='dispatcher-unread'),

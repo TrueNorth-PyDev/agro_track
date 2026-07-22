@@ -979,3 +979,111 @@ class DoubleBookingTests(APITestCase):
         res = self.client.patch(self.url, data)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
 
+
+class PODUploadTests(APITestCase):
+    """Tests for POST /api/v1/orders/{id}/pod/"""
+
+    def setUp(self):
+        import io
+        from PIL import Image as PILImage
+
+        self.sender = User.objects.create_user(
+            email='pod_sender@example.com', password='pass',
+            is_active=True, is_verified=True, role=User.Role.SENDER,
+        )
+        self.dispatcher = User.objects.create_user(
+            email='pod_dispatcher@example.com', password='pass',
+            is_active=True, is_verified=True, role=User.Role.DISPATCHER,
+        )
+        self.other_dispatcher = User.objects.create_user(
+            email='pod_other_disp@example.com', password='pass',
+            is_active=True, is_verified=True, role=User.Role.DISPATCHER,
+        )
+        self.admin = User.objects.create_user(
+            email='pod_admin@example.com', password='pass',
+            is_active=True, is_verified=True, role=User.Role.ADMIN,
+        )
+
+        self.order = _make_order(self.sender, dispatcher=self.dispatcher)
+        self.order.status = Order.Status.DELIVERED
+        self.order.save()
+
+        self.url = reverse('orders:order-pod-upload', kwargs={'pk': self.order.pk})
+
+        # Build a minimal valid in-memory image
+        buf = io.BytesIO()
+        img = PILImage.new('RGB', (100, 100), color=(255, 0, 0))
+        img.save(buf, format='JPEG')
+        buf.seek(0)
+        self.image_bytes = buf
+
+    def _make_image(self, name='pod.jpg'):
+        """Return a fresh SimpleUploadedFile-compatible image buffer."""
+        import io
+        from PIL import Image as PILImage
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        buf = io.BytesIO()
+        PILImage.new('RGB', (100, 100), color=(0, 128, 0)).save(buf, format='JPEG')
+        buf.seek(0)
+        return SimpleUploadedFile(name, buf.read(), content_type='image/jpeg')
+
+    # ── Access control ──────────────────────────────────────────────────
+
+    def test_sender_cannot_upload_pod(self):
+        self.client.force_authenticate(user=self.sender)
+        res = self.client.post(self.url, {'proof_of_delivery': self._make_image()}, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unauth_cannot_upload_pod(self):
+        res = self.client.post(self.url, {'proof_of_delivery': self._make_image()}, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_other_dispatcher_cannot_upload_pod(self):
+        self.client.force_authenticate(user=self.other_dispatcher)
+        res = self.client.post(self.url, {'proof_of_delivery': self._make_image()}, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    # ── Status gate ─────────────────────────────────────────────────────
+
+    def test_cannot_upload_pod_before_delivered(self):
+        self.order.status = Order.Status.IN_TRANSIT
+        self.order.save()
+        self.client.force_authenticate(user=self.dispatcher)
+        res = self.client.post(self.url, {'proof_of_delivery': self._make_image()}, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('status', res.data['errors'])
+
+    # ── Validation ──────────────────────────────────────────────────────
+
+    def test_missing_image_returns_400(self):
+        self.client.force_authenticate(user=self.dispatcher)
+        res = self.client.post(self.url, {}, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('proof_of_delivery', res.data['errors'])
+
+    # ── Success ─────────────────────────────────────────────────────────
+
+    def test_dispatcher_can_upload_pod(self):
+        self.client.force_authenticate(user=self.dispatcher)
+        res = self.client.post(self.url, {'proof_of_delivery': self._make_image()}, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.COMPLETED)
+        self.assertTrue(bool(self.order.proof_of_delivery))
+
+    def test_admin_can_upload_pod_regardless_of_dispatcher(self):
+        self.client.force_authenticate(user=self.admin)
+        res = self.client.post(self.url, {'proof_of_delivery': self._make_image()}, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.COMPLETED)
+
+    def test_response_contains_tracking_number_and_status(self):
+        self.client.force_authenticate(user=self.dispatcher)
+        res = self.client.post(self.url, {'proof_of_delivery': self._make_image()}, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        data = res.data['data']
+        self.assertEqual(data['tracking_number'], self.order.tracking_number)
+        self.assertEqual(data['status'], Order.Status.COMPLETED)
+        self.assertIn('proof_of_delivery', data)

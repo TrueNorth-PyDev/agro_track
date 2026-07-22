@@ -25,7 +25,7 @@ from django.db.models import Count, Q
 
 from accounts.views import success_response, get_envelope_serializer
 from accounts.permissions import IsSender, IsDispatcherOrAdmin
-from .models import Order, OrderStatusHistory, Vehicle, Driver, OrderMessage
+from .models import Order, OrderStatusHistory, Vehicle, Driver, OrderMessage, Review
 from .serializers import (
     OrderListSerializer,
     OrderDetailSerializer,
@@ -36,6 +36,7 @@ from .serializers import (
     VehicleSerializer,
     DriverSerializer,
     ReviewSerializer,
+    PODUploadSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -237,6 +238,116 @@ class OrderDetailView(GenericAPIView):
             serializer.save()
 
         return success_response('Shipment updated successfully.', data=serializer.data)
+
+
+class PODUploadView(GenericAPIView):
+    """
+    POST /api/v1/orders/{id}/pod/
+
+    Dedicated Proof of Delivery (POD) upload endpoint.
+
+    Accepts a `multipart/form-data` request with a single image field
+    (`proof_of_delivery`). On success, the image is saved and the order
+    status is automatically advanced to `COMPLETED`.
+
+    Access: Dispatcher or Admin only — and only the dispatcher assigned to
+    this specific order (or any admin).
+
+    Validation:
+      - Order must be in `DELIVERED` status (goods must have arrived first).
+      - Image must be a valid format (JPEG, PNG, WEBP).
+      - Image must not exceed 10 MB.
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = PODUploadSerializer
+
+    @extend_schema(
+        operation_id='order_pod_upload',
+        summary="Upload Proof of Delivery",
+        description=(
+            "Uploads the signed waybill or delivery confirmation photo for an order. "
+            "The order must be in `delivered` status before the POD can be submitted. "
+            "On success, the image is saved and the order status is automatically "
+            "advanced to `completed`. "
+            "Send as `multipart/form-data` with the image in the `proof_of_delivery` field."
+        ),
+        request={
+            'multipart/form-data': PODUploadSerializer,
+        },
+        responses={
+            200: OpenApiResponse(description="POD uploaded and order marked as completed"),
+            400: OpenApiResponse(description="Validation error (e.g. wrong status, file too large, unsupported format)"),
+            403: OpenApiResponse(description="Not the assigned dispatcher or not a dispatcher/admin"),
+            404: OpenApiResponse(description="Order not found"),
+        }
+    )
+    def post(self, request, pk, *args, **kwargs):
+        try:
+            order = Order.objects.select_related('dispatcher', 'sender').get(pk=pk)
+        except Order.DoesNotExist:
+            return Response(
+                {'success': False, 'message': 'Order not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        user = request.user
+
+        # Only dispatchers and admins can upload PODs
+        if not (user.is_dispatcher or user.is_admin_user):
+            return Response(
+                {'success': False, 'message': 'Only dispatchers and admins can upload proof of delivery.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # The dispatcher must be the one assigned to this order (admins bypass this)
+        if user.is_dispatcher and order.dispatcher_id and order.dispatcher_id != user.id:
+            return Response(
+                {'success': False, 'message': 'You are not the assigned dispatcher for this order.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Order must be in DELIVERED status — goods must have arrived first
+        if order.status != Order.Status.DELIVERED:
+            return Response(
+                {
+                    'success': False,
+                    'errors': {
+                        'status': [
+                            f'POD can only be uploaded once the order is marked as delivered. '
+                            f'Current status: {order.get_status_display()}.'
+                        ]
+                    }
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {'success': False, 'errors': serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Save image and advance status atomically
+        order.proof_of_delivery = serializer.validated_data['proof_of_delivery']
+        order.status = Order.Status.COMPLETED
+        order.save()
+
+        logger.info(
+            "POD uploaded for order %s by %s — status advanced to COMPLETED",
+            order.tracking_number, user.email
+        )
+
+        return success_response(
+            'Proof of delivery uploaded successfully. Order is now completed.',
+            data={
+                'order_id':         order.id,
+                'tracking_number':  order.tracking_number,
+                'status':           order.status,
+                'proof_of_delivery': request.build_absolute_uri(order.proof_of_delivery.url)
+                                     if order.proof_of_delivery else None,
+            }
+        )
 
 
 # Canonical ordered lifecycle steps used to build the checklist.
