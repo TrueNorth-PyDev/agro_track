@@ -363,10 +363,25 @@ Messages are ordered **newest-first**. `unread_count` only counts messages from 
 - The assigned driver's average `rating` field is recalculated instantly.
 - The global `customer_rating` in `GET /public/stats/` reflects the new average automatically.
 
-Driver ratings are visible in:
-- `GET /orders/{id}/` → `data.driver.rating`
-- `GET /orders/drivers/` → `rating` field per driver
-- `GET /admin/drivers/` → `rating` field per driver
+**The `review` field is embedded directly on every order response** — both `GET /orders/` (list) and `GET /orders/{id}/` (detail). If an order hasn't been rated yet, `review` is `null`.
+
+```json
+{
+  "tracking_number": "AGT12345678",
+  "status": "completed",
+  "driver": { "name": "Bola Ahmed", "rating": 4.2 },
+  "review": {
+    "id": 3,
+    "rating": 5,
+    "comment": "Excellent and timely delivery.",
+    "timestamp": "2026-07-22T10:30:00Z"
+  }
+}
+```
+
+Ratings are additionally visible as aggregates in:
+- `GET /orders/drivers/` → `rating` field per driver (aggregate)
+- `GET /admin/drivers/` → `rating` field per driver (aggregate)
 - `GET /public/stats/` → `data.customer_rating` (platform-wide average)
 
 ---

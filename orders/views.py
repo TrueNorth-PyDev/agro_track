@@ -130,9 +130,9 @@ class OrderListView(GenericAPIView):
     )
     def get(self, request, *args, **kwargs):
         if request.user.is_dispatcher or request.user.is_admin_user:
-            orders = Order.objects.all().select_related('sender', 'driver', 'vehicle')
+            orders = Order.objects.all().select_related('sender', 'driver', 'vehicle', 'review')
         else:
-            orders = Order.objects.filter(sender=request.user).select_related('driver', 'vehicle')
+            orders = Order.objects.filter(sender=request.user).select_related('driver', 'vehicle', 'review')
 
         serializer = self.get_serializer(orders, many=True)
         return success_response('Orders retrieved.', data=serializer.data)
@@ -177,7 +177,7 @@ class OrderDetailView(GenericAPIView):
     def get_object(self):
         try:
             order = Order.objects.select_related(
-                'sender', 'dispatcher', 'driver', 'vehicle'
+                'sender', 'dispatcher', 'driver', 'vehicle', 'review'
             ).prefetch_related('timeline').get(pk=self.kwargs['pk'])
             # Allow access if user is sender, dispatcher, or admin
             if (request := self.request).user.is_dispatcher or request.user.is_admin_user or order.sender == request.user:

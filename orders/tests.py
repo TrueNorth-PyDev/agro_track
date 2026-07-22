@@ -897,6 +897,40 @@ class ReviewTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("already rated", str(res.data))
 
+    def test_review_embedded_in_order_detail(self):
+        # Submit a rating first
+        self.client.force_authenticate(user=self.sender)
+        self.client.post(self.url, {'rating': 4, 'comment': 'Good job'})
+
+        # Fetch the order detail — review should be embedded
+        detail_url = reverse('orders:order-detail', kwargs={'pk': self.order.pk})
+        res = self.client.get(detail_url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        review = res.data['data']['review']
+        self.assertIsNotNone(review)
+        self.assertEqual(review['rating'], 4)
+        self.assertEqual(review['comment'], 'Good job')
+
+    def test_review_embedded_in_order_list(self):
+        # Submit a rating first
+        self.client.force_authenticate(user=self.sender)
+        self.client.post(self.url, {'rating': 5, 'comment': 'Excellent'})
+
+        # Fetch the order list — review should be embedded on the matching order
+        list_url = reverse('orders:order-list')
+        res = self.client.get(list_url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        order_data = next(o for o in res.data['data'] if o['id'] == self.order.id)
+        self.assertIsNotNone(order_data['review'])
+        self.assertEqual(order_data['review']['rating'], 5)
+
+    def test_unrated_order_has_null_review(self):
+        # No rating submitted — review field should be null
+        detail_url = reverse('orders:order-detail', kwargs={'pk': self.order.pk})
+        self.client.force_authenticate(user=self.sender)
+        res = self.client.get(detail_url)
+        self.assertIsNone(res.data['data']['review'])
+
 
 class DoubleBookingTests(APITestCase):
     def setUp(self):

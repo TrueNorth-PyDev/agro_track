@@ -314,11 +314,41 @@ Once a shipment is complete, the sender can leave a 1–5 star rating and commen
 
 | Endpoint | Field | Scope |
 |---|---|---|
-| `GET /orders/{id}/` | `data.driver.rating` | Rating of the specific assigned driver |
-| `GET /orders/drivers/` | `rating` | Per-driver average for dispatcher assignment view |
-| `GET /admin/drivers/` | `rating` | Per-driver average for admin oversight |
-| `GET /admin/drivers/{id}/` | `rating` | Full driver detail with rating |
-| `GET /public/stats/` | `data.customer_rating` | Platform-wide average (e.g. `"4.8 / 5"`) |
+| `GET /orders/` | `data[].review` | **Per-order** rating embedded on each order in the list |
+| `GET /orders/{id}/` | `data.review` | **Per-order** rating embedded on the order detail |
+| `GET /orders/drivers/` | `rating` | Per-driver aggregate average (for dispatcher assignment view) |
+| `GET /admin/drivers/` | `rating` | Per-driver aggregate average (for admin oversight) |
+| `GET /admin/drivers/{id}/` | `rating` | Full driver detail with aggregate rating |
+| `GET /public/stats/` | `data.customer_rating` | Platform-wide average across all reviews (e.g. `"4.8 / 5"`) |
+
+### Order response with embedded review
+
+Every order — in both the list and detail endpoints — now carries its own `review` field:
+
+```json
+{
+  "success": true,
+  "message": "Shipment details retrieved.",
+  "data": {
+    "id": 18,
+    "tracking_number": "AGT12345678",
+    "status": "completed",
+    "driver": {
+      "id": 4,
+      "name": "Bola Ahmed",
+      "rating": 4.2
+    },
+    "review": {
+      "id": 3,
+      "rating": 5,
+      "comment": "Great driver, arrived early!",
+      "timestamp": "2026-07-22T10:30:00Z"
+    }
+  }
+}
+```
+
+> If the order has not been rated yet, `review` is `null`. Use this to conditionally render a **"Leave a Review"** CTA vs. displaying the submitted rating in your UI.
 
 ---
 

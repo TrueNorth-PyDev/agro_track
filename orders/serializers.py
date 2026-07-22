@@ -113,12 +113,24 @@ class OrderMessageSerializer(serializers.ModelSerializer):
         return False
 
 
+class ReviewReadSerializer(serializers.ModelSerializer):
+    """
+    Read-only representation of a review, embedded inside order responses.
+    Shows the rating and comment that was left for this specific order.
+    `null` if the order has not been rated yet.
+    """
+    class Meta:
+        model = Review
+        fields = ('id', 'rating', 'comment', 'timestamp')
+
+
 class OrderListSerializer(serializers.ModelSerializer):
     """
     Serializer for lists of shipments (e.g., 'My Shipments' dashboard widget).
     Only includes high-level info needed for the UI.
     """
     driver = DriverSerializer(read_only=True)
+    review = ReviewReadSerializer(read_only=True)
 
     class Meta:
         model = Order
@@ -131,6 +143,7 @@ class OrderListSerializer(serializers.ModelSerializer):
             'created_at',
             'estimated_delivery_date',
             'driver',
+            'review',
         )
 
 
@@ -142,6 +155,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
     driver = DriverSerializer(read_only=True)
     vehicle = VehicleSerializer(read_only=True)
     timeline = OrderStatusHistorySerializer(many=True, read_only=True)
+    review = ReviewReadSerializer(read_only=True)
 
     driver_id = serializers.PrimaryKeyRelatedField(
         queryset=Driver.objects.all(), source='driver', write_only=True, required=False, allow_null=True
