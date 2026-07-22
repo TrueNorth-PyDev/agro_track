@@ -83,6 +83,8 @@ The dispatcher claims the order and assigns resources:
 - The order is now locked to this dispatcher.
 - The Timeline automatically logs **"Dispatcher Assigned"** and **"Driver & Vehicle Assigned"**.
 
+> **Double-booking protection:** If the selected driver or vehicle is currently assigned to another active (non-completed, non-cancelled) trip, the API returns a `400 Bad Request` with a clear error on the `driver_id` or `vehicle_id` field. Free up your resources first.
+
 ---
 
 ## 4. Transit & Live Tracking
@@ -241,9 +243,86 @@ Returns every message across **all** orders assigned to the requesting dispatche
 > `is_own_message` drives left/right bubble placement in a chat-style inbox UI.
 > Each message carries `tracking_number` + addresses so the frontend can link directly to the order without an extra API call.
 
+### Dispatcher Unread — Grouped by Chat
+**`GET /orders/messages/unread/`** *(Requires `dispatcher` or `admin` role)*
+
+Returns **only unread messages**, grouped by order/chat thread. Use this to show per-chat badge counts in the dispatcher UI.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "3 unread messages across 2 chats.",
+  "data": {
+    "total_unread": 3,
+    "threads": [
+      {
+        "order_id": 18,
+        "tracking_number": "AGT12345678",
+        "pickup_address": "Farm A, Kano",
+        "delivery_address": "Mile 12, Lagos",
+        "unread_count": 2,
+        "messages": [
+          {
+            "id": 42,
+            "sender_name": "Emeka Okafor",
+            "sender_initials": "E",
+            "content": "Is the truck at the farm yet?",
+            "timestamp": "2026-07-20T08:45:00Z"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+> **Typical frontend flow:**
+> 1. Poll `GET /orders/messages/unread/` on page load → render badge counts per thread.
+> 2. User opens a chat → call `POST /orders/{id}/messages/read/` to clear that chat only.
+> 3. Re-fetch unread → the opened chat disappears from threads; others remain intact.
+
 ---
 
-## 6. Proof of Delivery (Completion)
+## 6. Ratings & Reviews
+
+Once a shipment is complete, the sender can leave a 1–5 star rating and comment for their driver.
+
+### Submit a Rating
+**`POST /orders/{id}/rate/`** *(Requires `sender` role)*
+
+```json
+{
+  "rating": 5,
+  "comment": "Smooth delivery, arrived early!"
+}
+```
+
+**Validation rules:**
+- `rating` must be an integer between 1 and 5.
+- The order must have `status = completed`.
+- The order must have a driver assigned.
+- Each order can only be rated once — attempting again returns `400`.
+- Only the order's own sender can rate it — others get `404`.
+
+**What happens after a successful submission:**
+- A `Review` record is saved against the order.
+- The assigned driver's average `rating` is recalculated and saved immediately.
+- The platform-wide `customer_rating` in `GET /public/stats/` updates automatically.
+
+### Where ratings surface
+
+| Endpoint | Field | Scope |
+|---|---|---|
+| `GET /orders/{id}/` | `data.driver.rating` | Rating of the specific assigned driver |
+| `GET /orders/drivers/` | `rating` | Per-driver average for dispatcher assignment view |
+| `GET /admin/drivers/` | `rating` | Per-driver average for admin oversight |
+| `GET /admin/drivers/{id}/` | `rating` | Full driver detail with rating |
+| `GET /public/stats/` | `data.customer_rating` | Platform-wide average (e.g. `"4.8 / 5"`) |
+
+---
+
+## 7. Proof of Delivery (Completion)
 
 When the goods arrive and are signed for, the dispatcher uploads the signed waybill to close out the order.
 
@@ -372,3 +451,16 @@ new_request → assigned → pending_pickup → in_transit → delivered → com
 ```
 
 Any status can transition to `cancelled` at any point.
+
+---
+
+## Appendix: Key Business Rules
+
+| Rule | Detail |
+|---|---|
+| Driver double-booking | A driver already on an active trip cannot be assigned to another. Returns `400` with `driver_id` error. |
+| Vehicle double-booking | Same rule for vehicles — one active trip at a time. Returns `400` with `vehicle_id` error. |
+| Rating once per order | Each completed order can be rated exactly once. Subsequent attempts return `400`. |
+| Rating range | Must be an integer 1–5. Enforced at both serializer and DB (`CheckConstraint`) level. |
+| POD required for completion | An order cannot be set to `completed` without a `proof_of_delivery` image. |
+| Chat access control | Only the sender and the assigned dispatcher (or an admin) can view or send messages on an order. |

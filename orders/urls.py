@@ -3,7 +3,7 @@ from .views import (
     DashboardView, OrderListView, OrderDetailView,
     OrderTimelineView, OrderTimelineEventUpdateView,
     OrderMessageListCreateView, OrderMessageMarkReadView,
-    DispatcherInboxView,
+    DispatcherInboxView, DispatcherUnreadView,
     FleetOverviewView, DriverListView, VehicleListView,
     ReportsView, ReviewCreateView
 )
@@ -21,6 +21,7 @@ urlpatterns = [
     path('<int:pk>/', OrderDetailView.as_view(), name='order-detail'),
     path('<int:pk>/timeline/', OrderTimelineView.as_view(), name='order-timeline'),
     path('messages/', DispatcherInboxView.as_view(), name='dispatcher-inbox'),
+    path('messages/unread/', DispatcherUnreadView.as_view(), name='dispatcher-unread'),
     path('<int:pk>/messages/', OrderMessageListCreateView.as_view(), name='order-messages'),
     path('<int:pk>/messages/read/', OrderMessageMarkReadView.as_view(), name='order-messages-mark-read'),
     path('<int:pk>/rate/', ReviewCreateView.as_view(), name='order-rate'),

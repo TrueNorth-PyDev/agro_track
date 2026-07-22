@@ -158,11 +158,33 @@ class OrderDetailSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         current_status = attrs.get('status', getattr(self.instance, 'status', None))
         pod = attrs.get('proof_of_delivery', getattr(self.instance, 'proof_of_delivery', None))
+        driver = attrs.get('driver', getattr(self.instance, 'driver', None))
+        vehicle = attrs.get('vehicle', getattr(self.instance, 'vehicle', None))
 
         if current_status == Order.Status.COMPLETED and not pod:
             raise serializers.ValidationError({
                 'proof_of_delivery': 'Proof of delivery image is required when completing a shipment.'
             })
+
+        # Prevent Driver double-booking
+        if 'driver' in attrs and driver:
+            active_orders = driver.orders.exclude(status__in=[Order.Status.COMPLETED, Order.Status.CANCELLED])
+            if self.instance:
+                active_orders = active_orders.exclude(id=self.instance.id)
+            if active_orders.exists():
+                raise serializers.ValidationError({
+                    'driver_id': 'This driver is currently assigned to an active trip and cannot be double-booked.'
+                })
+
+        # Prevent Vehicle double-booking
+        if 'vehicle' in attrs and vehicle:
+            active_orders = vehicle.orders.exclude(status__in=[Order.Status.COMPLETED, Order.Status.CANCELLED])
+            if self.instance:
+                active_orders = active_orders.exclude(id=self.instance.id)
+            if active_orders.exists():
+                raise serializers.ValidationError({
+                    'vehicle_id': 'This vehicle is currently assigned to an active trip and cannot be double-booked.'
+                })
 
         return attrs
 

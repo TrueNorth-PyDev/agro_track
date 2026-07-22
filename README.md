@@ -33,9 +33,9 @@ agrotrack/
 │   └── views.py            # API views + OpenAPI annotations
 │
 ├── orders/                 # Order lifecycle, fleet, drivers, reports
-│   ├── models.py           # Order, Driver, Vehicle, OrderStatusHistory, OrderMessage
-│   ├── serializers.py      # OrderCreate, OrderList, OrderDetail, Driver, Vehicle…
-│   ├── tests.py            # Orders & fleet test suite (49 tests)
+│   ├── models.py           # Order, Driver, Vehicle, OrderStatusHistory, OrderMessage, Review
+│   ├── serializers.py      # OrderCreate, OrderList, OrderDetail, Driver, Vehicle, Review…
+│   ├── tests.py            # Orders & fleet test suite (152 tests across all suites)
 │   ├── urls.py             # Mounted at /api/v1/orders/
 │   └── views.py            # API views + OpenAPI annotations
 │
@@ -115,7 +115,7 @@ python -c "from django.core.management.utils import get_random_secret_key; print
 ## Running Tests
 
 ```bash
-# Full test suite (136 tests)
+# Full test suite (152 tests)
 python manage.py test --settings=agrotrack.settings_test
 
 # Single app
@@ -174,8 +174,10 @@ When the server is running, interactive docs are available at:
 | GET | `/{id}/timeline/` | JWT | Auto-generated status timeline + checklist |
 | PATCH | `/timeline/{event_id}/` | JWT (Dispatcher/Admin) | Edit timeline event description |
 | GET | `/messages/` | JWT (Dispatcher/Admin) | Dispatcher inbox — all messages with counts |
+| GET | `/messages/unread/` | JWT (Dispatcher/Admin) | Unread messages grouped by chat/order |
 | GET / POST | `/{id}/messages/` | JWT | Order-scoped chat thread |
-| POST | `/{id}/messages/read/` | JWT | Mark incoming messages as read |
+| POST | `/{id}/messages/read/` | JWT | Mark messages in a specific chat as read |
+| POST | `/{id}/rate/` | JWT (Sender) | Rate a completed shipment (1–5 stars) |
 | GET | `/fleet/` | JWT (Dispatcher) | Fleet overview |
 | GET | `/drivers/` | JWT (Dispatcher) | Active drivers for assignment |
 | GET | `/vehicles/` | JWT (Dispatcher) | Vehicles for assignment |
@@ -301,6 +303,74 @@ Messages are ordered **newest-first**. `unread_count` only counts messages from 
 
 ---
 
+## Dispatcher Unread Messages
+
+`GET /api/v1/orders/messages/unread/` provides unread messages **grouped per order/chat thread** — ideal for showing a per-chat badge count in the dispatcher UI.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "3 unread messages across 2 chats.",
+  "data": {
+    "total_unread": 3,
+    "threads": [
+      {
+        "order_id": 18,
+        "tracking_number": "AGT12345678",
+        "pickup_address": "Farm A, Kano",
+        "delivery_address": "Mile 12, Lagos",
+        "unread_count": 2,
+        "messages": [
+          {
+            "id": 42,
+            "sender_name": "Emeka Okafor",
+            "sender_initials": "E",
+            "content": "Is the truck at the farm yet?",
+            "timestamp": "2026-07-20T08:45:00Z"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+> **Mark a specific chat as read:** `POST /api/v1/orders/{id}/messages/read/` clears only that order's unread messages — other chats are unaffected.
+
+---
+
+## Ratings & Reviews
+
+`POST /api/v1/orders/{id}/rate/` allows senders to submit a 1–5 star rating and comment for a completed order.
+
+**Rules:**
+- Only the order's sender can rate it.
+- The order status must be `completed`.
+- The order must have a driver assigned.
+- Each order can only be rated once.
+
+**Request:**
+```json
+{
+  "rating": 5,
+  "comment": "Excellent and timely delivery."
+}
+```
+
+**What happens after submission:**
+- A `Review` record is saved against the order.
+- The assigned driver's average `rating` field is recalculated instantly.
+- The global `customer_rating` in `GET /public/stats/` reflects the new average automatically.
+
+Driver ratings are visible in:
+- `GET /orders/{id}/` → `data.driver.rating`
+- `GET /orders/drivers/` → `rating` field per driver
+- `GET /admin/drivers/` → `rating` field per driver
+- `GET /public/stats/` → `data.customer_rating` (platform-wide average)
+
+---
+
 ## User Roles
 
 | Role | Value | Description |
@@ -360,7 +430,7 @@ Available at `/admin/`. Create a superuser via Railway's shell:
 python manage.py createsuperuser
 ```
 
-All models are registered: **User**, **OTPVerification**, **Order**, **Driver**, **Vehicle**, **OrderStatusHistory**, **PlatformSettings**.
+All models are registered: **User**, **OTPVerification**, **Order**, **Driver**, **Vehicle**, **OrderStatusHistory**, **OrderMessage**, **Review**, **PlatformSettings**.
 
 ---
 
@@ -375,3 +445,5 @@ All models are registered: **User**, **OTPVerification**, **Order**, **Driver**,
 - **UUIDs**: User primary keys are UUIDs — no sequential ID leakage
 - **CORS**: Strict origin whitelist via `CORS_ALLOWED_ORIGINS`
 - **PUT blocked on drivers**: Driver detail endpoint only accepts PATCH to prevent accidental field nulling
+- **Double-booking prevention**: Assigning a driver or vehicle already on an active trip is blocked at the serializer level with a 400 error
+- **Rating integrity**: One review per order enforced via `OneToOneField`; rating range 1–5 enforced via a DB-level `CheckConstraint`

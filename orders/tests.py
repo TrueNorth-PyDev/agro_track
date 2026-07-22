@@ -733,6 +733,106 @@ class DispatcherInboxTests(APITestCase):
         self.assertEqual(msg['tracking_number'], self.order1.tracking_number)
 
 
+UNREAD_URL = reverse('orders:dispatcher-unread')
+
+
+class DispatcherUnreadTests(APITestCase):
+    def setUp(self):
+        self.sender = User.objects.create_user(
+            email='unread_sender@example.com', password='pass', full_name='Sender One',
+            is_active=True, is_verified=True, role=User.Role.SENDER,
+        )
+        self.dispatcher = User.objects.create_user(
+            email='unread_disp@example.com', password='pass', full_name='Dispatcher One',
+            is_active=True, is_verified=True, role=User.Role.DISPATCHER,
+        )
+
+        self.order1 = _make_order(self.sender, dispatcher=self.dispatcher)
+        self.order2 = _make_order(
+            self.sender, dispatcher=self.dispatcher,
+            pickup_address='Kaduna', delivery_address='Abuja',
+        )
+
+    # ── Access control ────────────────────────────────────────────────────
+
+    def test_sender_cannot_access_unread(self):
+        self.client.force_authenticate(user=self.sender)
+        res = self.client.get(UNREAD_URL)
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unauthenticated_cannot_access_unread(self):
+        res = self.client.get(UNREAD_URL)
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # ── Empty state ───────────────────────────────────────────────────────
+
+    def test_empty_returns_zero_total_and_empty_threads(self):
+        self.client.force_authenticate(user=self.dispatcher)
+        res = self.client.get(UNREAD_URL)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['data']['total_unread'], 0)
+        self.assertEqual(res.data['data']['threads'], [])
+
+    # ── Unread grouping ───────────────────────────────────────────────────
+
+    def test_unread_messages_grouped_by_order(self):
+        # 2 unread on order1, 1 unread on order2
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Msg A')
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Msg B')
+        OrderMessage.objects.create(order=self.order2, sender=self.sender, content='Msg C')
+
+        self.client.force_authenticate(user=self.dispatcher)
+        res = self.client.get(UNREAD_URL)
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        data = res.data['data']
+        self.assertEqual(data['total_unread'], 3)
+        self.assertEqual(len(data['threads']), 2)
+
+        # Find the thread for order1
+        thread1 = next(t for t in data['threads'] if t['order_id'] == self.order1.id)
+        self.assertEqual(thread1['unread_count'], 2)
+        self.assertEqual(len(thread1['messages']), 2)
+
+    def test_own_messages_not_included_in_unread(self):
+        # Dispatcher sends a message — should NOT appear in unread
+        OrderMessage.objects.create(order=self.order1, sender=self.dispatcher, content='I replied')
+        # Sender sends one — SHOULD appear
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Hi')
+
+        self.client.force_authenticate(user=self.dispatcher)
+        res = self.client.get(UNREAD_URL)
+        self.assertEqual(res.data['data']['total_unread'], 1)
+
+    def test_already_read_messages_not_included(self):
+        msg = OrderMessage.objects.create(
+            order=self.order1, sender=self.sender, content='Already read', is_read=True
+        )
+        self.client.force_authenticate(user=self.dispatcher)
+        res = self.client.get(UNREAD_URL)
+        self.assertEqual(res.data['data']['total_unread'], 0)
+
+    # ── Mark specific chat as read ─────────────────────────────────────────
+
+    def test_mark_specific_order_chat_as_read(self):
+        OrderMessage.objects.create(order=self.order1, sender=self.sender, content='Chat 1')
+        OrderMessage.objects.create(order=self.order2, sender=self.sender, content='Chat 2')
+
+        # Mark only order1's chat as read
+        mark_url = reverse('orders:order-messages-mark-read', kwargs={'pk': self.order1.pk})
+        self.client.force_authenticate(user=self.dispatcher)
+        res = self.client.post(mark_url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['data']['marked_read'], 1)
+
+        # Now unread should only contain order2
+        res2 = self.client.get(UNREAD_URL)
+        data = res2.data['data']
+        self.assertEqual(data['total_unread'], 1)
+        self.assertEqual(len(data['threads']), 1)
+        self.assertEqual(data['threads'][0]['order_id'], self.order2.id)
+
+
 class ReviewTests(APITestCase):
     def setUp(self):
         self.sender = User.objects.create_user(
@@ -796,4 +896,52 @@ class ReviewTests(APITestCase):
         res = self.client.post(self.url, {'rating': 5})
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("already rated", str(res.data))
+
+
+class DoubleBookingTests(APITestCase):
+    def setUp(self):
+        self.sender = User.objects.create_user(
+            email='sender@example.com', password='pass', role=User.Role.SENDER, is_active=True, is_verified=True
+        )
+        self.dispatcher = User.objects.create_user(
+            email='disp@example.com', password='pass', role=User.Role.DISPATCHER, is_active=True, is_verified=True
+        )
+        
+        self.driver = Driver.objects.create(name="Driver 1")
+        self.vehicle = Vehicle.objects.create(registration_number="V1")
+        
+        # Order 1 is in progress
+        self.order1 = _make_order(self.sender, dispatcher=self.dispatcher)
+        self.order1.driver = self.driver
+        self.order1.vehicle = self.vehicle
+        self.order1.status = Order.Status.IN_TRANSIT
+        self.order1.save()
+        
+        # Order 2 is a new request
+        self.order2 = _make_order(self.sender, dispatcher=self.dispatcher)
+        
+        self.url = reverse('orders:order-detail', kwargs={'pk': self.order2.pk})
+
+    def test_cannot_assign_busy_driver(self):
+        self.client.force_authenticate(user=self.dispatcher)
+        data = {'driver_id': self.driver.id}
+        res = self.client.patch(self.url, data)
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('driver_id', res.data['errors'])
+
+    def test_cannot_assign_busy_vehicle(self):
+        self.client.force_authenticate(user=self.dispatcher)
+        data = {'vehicle_id': self.vehicle.id}
+        res = self.client.patch(self.url, data)
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('vehicle_id', res.data['errors'])
+
+    def test_can_assign_if_driver_finished_previous_order(self):
+        self.order1.status = Order.Status.COMPLETED
+        self.order1.save()
+        
+        self.client.force_authenticate(user=self.dispatcher)
+        data = {'driver_id': self.driver.id, 'vehicle_id': self.vehicle.id}
+        res = self.client.patch(self.url, data)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
 

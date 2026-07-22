@@ -728,6 +728,96 @@ class DispatcherInboxView(GenericAPIView):
         )
 
 
+class DispatcherUnreadView(GenericAPIView):
+    """
+    GET /api/v1/orders/messages/unread/
+
+    Returns only unread messages (sent by senders) across all orders
+    assigned to the requesting dispatcher, grouped by chat/order thread.
+
+    Each thread entry includes:
+      - `order_id`
+      - `tracking_number`
+      - `pickup_address` / `delivery_address`
+      - `unread_count`   — number of unread messages in that chat
+      - `messages`       — the actual unread message objects
+
+    Access: Dispatcher or Admin only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        operation_id='dispatcher_unread_messages',
+        summary="Get dispatcher unread messages (grouped by chat)",
+        description=(
+            "Returns all unread messages across every order assigned to the "
+            "requesting dispatcher, grouped by order/chat thread. "
+            "Useful for showing a badge count per chat and previewing "
+            "which conversations need attention. "
+            "To mark a specific chat as read, call "
+            "POST /orders/{id}/messages/read/."
+        ),
+        responses={
+            200: OpenApiResponse(description=(
+                "Unread payload: `total_unread` (int), "
+                "`threads` (list of per-order unread groups)."
+            )),
+            403: OpenApiResponse(description="Not a dispatcher or admin"),
+        }
+    )
+    def get(self, request, *args, **kwargs):
+        user = request.user
+
+        if not (user.role == user.Role.DISPATCHER or user.is_admin_user):
+            return Response(
+                {'success': False, 'message': 'Only dispatchers and admins can access unread messages.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # All unread messages from senders (not sent by the dispatcher themselves)
+        unread_qs = (
+            OrderMessage.objects
+            .filter(order__dispatcher=user, is_read=False)
+            .exclude(sender=user)
+            .select_related('order', 'sender')
+            .order_by('order_id', '-timestamp')
+        )
+
+        # Group by order thread
+        threads = {}
+        for msg in unread_qs:
+            oid = msg.order_id
+            if oid not in threads:
+                threads[oid] = {
+                    'order_id':         oid,
+                    'tracking_number':  msg.order.tracking_number,
+                    'pickup_address':   msg.order.pickup_address,
+                    'delivery_address': msg.order.delivery_address,
+                    'unread_count':     0,
+                    'messages':         [],
+                }
+            threads[oid]['unread_count'] += 1
+            threads[oid]['messages'].append({
+                'id':              msg.id,
+                'sender_name':     msg.sender.full_name or msg.sender.email,
+                'sender_initials': (msg.sender.full_name or msg.sender.email)[0].upper(),
+                'content':         msg.content,
+                'timestamp':       msg.timestamp.isoformat(),
+            })
+
+        thread_list = list(threads.values())
+        total_unread = sum(t['unread_count'] for t in thread_list)
+
+        return success_response(
+            f'{total_unread} unread message{"s" if total_unread != 1 else ""} across '
+            f'{len(thread_list)} chat{"s" if len(thread_list) != 1 else ""}.',
+            data={
+                'total_unread': total_unread,
+                'threads':      thread_list,
+            }
+        )
+
+
 class FleetOverviewView(GenericAPIView):
     """
     GET /api/v1/orders/fleet/
