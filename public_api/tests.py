@@ -12,7 +12,76 @@ ESTIMATE_URL = '/api/v1/public/estimate/'
 
 
 class PublicAPITests(APITestCase):
+    def test_locations_endpoint(self):
+        url = reverse('public_api:locations')
+        
+        # Test full list
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['success'])
+        self.assertIsInstance(response.data['data'], list)
+        self.assertGreater(len(response.data['data']), 0)
+        self.assertIn('state', response.data['data'][0])
+        self.assertIn('lgas', response.data['data'][0])
+
+        # Test filter by state
+        response = self.client.get(url, {'state': 'lagos'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['success'])
+        self.assertEqual(response.data['data']['state'].lower(), 'lagos')
+        self.assertIn('Ikeja', response.data['data']['lgas'])
+
+        # Test invalid state
+        response = self.client.get(url, {'state': 'invalid_state'})
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertFalse(response.data['success'])
+
+    def test_complete_delivery_endpoint(self):
+        # Create a test image
+        from io import BytesIO
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        img = BytesIO()
+        Image.new('RGB', (100, 100), color='red').save(img, format='JPEG')
+        img.seek(0)
+        pod_file = SimpleUploadedFile("pod.jpg", img.read(), content_type="image/jpeg")
+
+        url = reverse('public_api:complete_delivery', kwargs={'tracking_number': self.order.tracking_number})
+
+        # Test invalid PIN
+        response = self.client.post(url, {
+            'delivery_pin': '9999',  # Assuming it's not the actual pin
+            'proof_of_delivery': pod_file
+        }, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Invalid Delivery PIN', response.data['message'])
+
+        # Reset file pointer
+        img.seek(0)
+        pod_file = SimpleUploadedFile("pod2.jpg", img.read(), content_type="image/jpeg")
+
+        # Test valid PIN
+        response = self.client.post(url, {
+            'delivery_pin': self.order.delivery_pin,
+            'proof_of_delivery': pod_file
+        }, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.COMPLETED)
+        self.assertIsNotNone(self.order.proof_of_delivery)
+
+    def test_public_tracking_includes_pin(self):
+        url = reverse('public_api:track', kwargs={'tracking_number': self.order.tracking_number})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('delivery_pin', response.data['data'])
+        self.assertEqual(response.data['data']['delivery_pin'], self.order.delivery_pin)
+
     def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
         # Create a sender user to associate with the order
         self.sender = User.objects.create_user(
             email='sender@test.com',

@@ -20,8 +20,9 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiResponse
-
 from django.db.models import Count, Q
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 
 from accounts.views import success_response, get_envelope_serializer
 from accounts.permissions import IsSender, IsDispatcherOrAdmin
@@ -692,7 +693,17 @@ class OrderMessageListCreateView(GenericAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         # Create the message
-        serializer.save(order=order, sender=request.user)
+        message = serializer.save(order=order, sender=request.user)
+
+        # Broadcast via WebSockets
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f'chat_{order.id}',
+            {
+                'type': 'chat_message',
+                'payload': serializer.data
+            }
+        )
 
         logger.info(
             "Message sent on order %s by %s",
@@ -748,12 +759,30 @@ class OrderMessageMarkReadView(GenericAPIView):
             )
 
         # Bulk-update: mark all messages NOT sent by the current user as read
-        updated = order.messages.filter(is_read=False).exclude(sender=user).update(is_read=True)
+        updated_count = order.messages.filter(
+            is_read=False
+        ).exclude(sender=request.user).update(is_read=True)
 
-        return success_response(
-            f'{updated} message{"s" if updated != 1 else ""} marked as read.',
-            data={'marked_read': updated}
-        )
+        if updated_count > 0:
+            # Broadcast read receipt via WebSockets
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f'chat_{order.id}',
+                {
+                    'type': 'chat_read',
+                    'payload': {
+                        'reader_id': request.user.id,
+                        'order_id': order.id,
+                        'count': updated_count
+                    }
+                }
+            )
+
+        return Response({
+            'success': True,
+            'message': f'{updated_count} messages marked as read.',
+            'data': {'marked_read': updated_count}
+        })
 
 
 class DispatcherInboxView(GenericAPIView):

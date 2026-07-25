@@ -17,5 +17,5 @@ class PublicTrackingSerializer(serializers.ModelSerializer):
         fields = [
             'tracking_number', 'status', 'status_display', 'current_location',
             'estimated_delivery_date', 'pickup_address', 'delivery_address',
-            'pickup_contact_name', 'delivery_name', 'created_at', 'timeline'
+            'pickup_contact_name', 'delivery_name', 'created_at', 'timeline', 'delivery_pin'
         ]

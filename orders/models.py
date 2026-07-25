@@ -15,6 +15,11 @@ def generate_tracking_number():
             return tracking_number
 
 
+def generate_delivery_pin():
+    """Generates a random 4-digit PIN for delivery verification."""
+    return ''.join(random.choices(string.digits, k=4))
+
+
 def generate_driver_id():
     """Generates a sequential driver ID like D001, D002, etc."""
     from django.apps import apps
@@ -120,6 +125,7 @@ class Order(models.Model):
     current_location = models.CharField(max_length=255, blank=True, default='')
     progress_percentage = models.IntegerField(default=0)
     proof_of_delivery = models.ImageField(upload_to='pod/', null=True, blank=True)
+    delivery_pin = models.CharField(max_length=10, default=generate_delivery_pin, help_text="PIN required to confirm delivery")
 
     # Pickup Info
     pickup_address = models.CharField(max_length=255)

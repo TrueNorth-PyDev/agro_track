@@ -25,6 +25,28 @@ Before anyone can use the protected API, they need an account and a JWT.
 All protected endpoints require the access token in the header:
 `Authorization: Bearer <access_token>`
 
+### Get Locations List
+`GET /api/v1/public/locations/`
+
+Fetches a list of Nigerian states and their Local Government Areas (LGAs) for populating frontend dropdowns.
+
+**Query Parameters**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `state` | string | No | Filter cities for a specific state (e.g. `?state=Lagos`). Case-insensitive. |
+
+**Example Response (`/api/v1/public/locations/?state=Lagos`)**
+```json
+{
+  "success": true,
+  "message": "Locations retrieved successfully.",
+  "data": {
+    "state": "Lagos",
+    "lgas": ["Agege", "Alimosho", "Ikeja", "..."]
+  }
+}
+```
+
 ---
 
 ## 2. Order Creation (The Sender)
@@ -242,6 +264,99 @@ Returns every message across **all** orders assigned to the requesting dispatche
 > `unread_count` only counts messages from senders — not the dispatcher's own sent messages.
 > `is_own_message` drives left/right bubble placement in a chat-style inbox UI.
 > Each message carries `tracking_number` + addresses so the frontend can link directly to the order without an extra API call.
+
+### Real-Time WebSocket Connection
+**`ws://<domain>/ws/chat/orders/{id}/?token=<jwt_access_token>`**
+
+Connect to this WebSocket to receive real-time events without polling.
+
+#### Protocol and Domain Guidelines
+- **Local Development:** Use the standard WebSocket protocol (`ws://`). E.g., `ws://localhost:8000/ws/chat/orders/{id}/?token=...`
+- **Production (e.g., Railway):** You must use the secure WebSocket protocol (`wss://`) because the API sits behind HTTPS. E.g., `wss://agrotrack-api.up.railway.app/ws/chat/orders/{id}/?token=...`
+
+#### Frontend Implementation Steps
+
+1. **Fetch Historical Data:** Upon opening a chat window, make a `GET /orders/{id}/messages/` request to load the conversation history and get the `unread_count`.
+2. **Open WebSocket:** Immediately open a WebSocket connection to listen for incoming messages while the user has the chat open.
+    - *Note:* You must pass the JWT access token in the query string because WebSockets do not support standard `Authorization` headers.
+3. **Handle Incoming Events:** Listen for messages on the WebSocket (see payload structures below). When a `chat_message` arrives:
+    - If the message is from the other party (`is_own_message: false`), append it to the chat UI and optionally play a sound.
+4. **Send Messages via HTTP:** When the user types and sends a message, make an HTTP `POST /orders/{id}/messages/` request. 
+    - *Do not attempt to send the message payload through the WebSocket.* Sending via HTTP ensures standard validation and error handling. The backend will automatically broadcast your new message to the WebSocket group.
+5. **Mark as Read:** If the chat window is focused and an incoming message arrives, make an HTTP `POST /orders/{id}/messages/read/` request to clear the unread count on the backend. This triggers a `chat_read` broadcast so the sender knows their message was read.
+
+#### Events Received
+
+1. **New Message** (Triggered when anyone posts to the REST API)
+```json
+{
+  "type": "chat_message",
+  "data": {
+    "id": 43,
+    "sender_name": "Bola Ahmed",
+    "sender_initials": "B",
+    "is_own_message": false,
+    "content": "I am 5 mins away.",
+    "is_read": false,
+    "timestamp": "2026-07-22T10:35:00Z"
+  }
+}
+```
+
+2. **Read Receipt** (Triggered when the other party marks messages as read)
+```json
+{
+  "type": "chat_read",
+  "data": {
+    "reader_id": 4,
+    "order_id": 18,
+    "count": 2
+  }
+}
+```
+
+#### Frontend Code Example (JavaScript)
+```javascript
+// 1. Get the current auth token
+const token = localStorage.getItem('access_token');
+const orderId = 12; 
+
+// 2. Determine the correct protocol (wss:// for production HTTPS, ws:// for local HTTP)
+const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+const domain = 'agrotrack-api.up.railway.app'; // Or window.location.host
+
+// 3. Open the connection
+const wsUrl = `${protocol}${domain}/ws/chat/orders/${orderId}/?token=${token}`;
+const chatSocket = new WebSocket(wsUrl);
+
+// 4. Listen for incoming events
+chatSocket.onmessage = function(e) {
+    const payload = JSON.parse(e.data);
+    
+    if (payload.type === 'chat_message') {
+        const message = payload.data;
+        console.log('New message received:', message.content);
+        // TODO: Append to UI
+    } 
+    else if (payload.type === 'chat_read') {
+        const readData = payload.data;
+        console.log(`${readData.count} messages were marked as read`);
+        // TODO: Update read receipts in UI
+    }
+};
+
+// 5. Handle connection open/close
+chatSocket.onopen = function(e) {
+    console.log('Chat WebSocket connected successfully!');
+};
+
+chatSocket.onclose = function(e) {
+    console.error('Chat WebSocket closed unexpectedly.');
+    // Optional: Implement reconnection logic here
+};
+```
+
+---
 
 ### Dispatcher Unread — Grouped by Chat
 **`GET /orders/messages/unread/`** *(Requires `dispatcher` or `admin` role)*
@@ -469,6 +584,33 @@ estimated_cost = (base_rate + distance_km × distance_surcharge_per_km) × prior
 | `estimated_cost` | Final billable estimate after multiplier |
 
 > **Error Handling:** If an address can't be geocoded, the API returns `400` with a descriptive message. If the geocoding service is completely down, it returns `503`. The frontend should always handle both gracefully.
+
+---
+
+### Secure Proof of Delivery (Public)
+**`POST /api/v1/public/track/{tracking_number}/complete/`**
+
+Allows unauthenticated drivers to complete an order by providing the `delivery_pin` (given to the receiver) and a proof-of-delivery image. This endpoint should be sent as `multipart/form-data`.
+
+**Form Data Fields:**
+- `delivery_pin`: (String) The 4-digit PIN the receiver has.
+- `proof_of_delivery`: (File) The photo confirming delivery.
+
+**Example Response (Success):**
+```json
+{
+  "success": true,
+  "message": "Proof of delivery submitted. Order completed successfully."
+}
+```
+
+**Example Response (Invalid PIN):**
+```json
+{
+  "success": false,
+  "message": "Invalid Delivery PIN."
+}
+```
 
 ---
 

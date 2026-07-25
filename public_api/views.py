@@ -205,6 +205,55 @@ class PublicPlatformStatsView(APIView):
         return success_response('Platform stats retrieved.', data=data)
 
 
+class PublicLocationsView(APIView):
+    """
+    GET /api/v1/public/locations/
+
+    Returns the list of Nigerian states and their LGAs from a static JSON file.
+    Optional query param: `?state=Lagos` to filter by state.
+    """
+    permission_classes = []
+    authentication_classes = []
+
+    @extend_schema(
+        tags=['Public API'],
+        summary="Get Nigerian States and LGAs",
+        description="Returns a list of Nigerian states and their Local Government Areas. Used for populating frontend location pickers.",
+        responses={
+            200: OpenApiResponse(description="Returns a list of state objects or a single state object if filtered.")
+        }
+    )
+    def get(self, request, *args, **kwargs):
+        import os, json
+        from django.conf import settings
+
+        file_path = os.path.join(settings.BASE_DIR, 'public_api', 'data', 'nigeria_states.json')
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return Response(
+                {'success': False, 'message': 'Location data not found.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        state_query = request.query_params.get('state', '').strip().lower()
+
+        if state_query:
+            # Filter by state name (case-insensitive)
+            filtered = [s for s in data if s.get('state', '').lower() == state_query]
+            if filtered:
+                return success_response('Locations retrieved successfully.', data=filtered[0])
+            else:
+                return Response(
+                    {'success': False, 'message': 'State not found.'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        return success_response('Locations retrieved successfully.', data=data)
+
+
 class PublicTrackingView(RetrieveAPIView):
     """
     GET /api/v1/public/track/{tracking_number}/
@@ -246,3 +295,65 @@ class PublicTrackingView(RetrieveAPIView):
             )
         serializer = self.get_serializer(instance)
         return success_response('Shipment found.', data=serializer.data)
+
+
+class PublicCompleteDeliveryView(APIView):
+    """
+    POST /api/v1/public/track/{tracking_number}/complete/
+
+    Completes a delivery via the public API using a Delivery PIN and a photo.
+    This acts as a secure Proof of Delivery for drivers using the public web app.
+    """
+    permission_classes = []
+    authentication_classes = []
+
+    @extend_schema(
+        tags=['Public API'],
+        summary="Secure Proof of Delivery",
+        description="Allows a driver to mark an order as completed by submitting the receiver's secret Delivery PIN along with a proof-of-delivery photo. No authentication required.",
+        request=inline_serializer('PublicPODRequest', {
+            'delivery_pin': serializers.CharField(required=True, help_text="The 4-digit PIN given to the receiver"),
+            'proof_of_delivery': serializers.ImageField(required=True)
+        }),
+        responses={
+            200: OpenApiResponse(description="Delivery completed successfully"),
+            400: OpenApiResponse(description="Invalid PIN, invalid state, or missing fields"),
+            404: OpenApiResponse(description="Tracking number not found")
+        }
+    )
+    def post(self, request, tracking_number, *args, **kwargs):
+        try:
+            order = Order.objects.get(tracking_number=tracking_number)
+        except Order.DoesNotExist:
+            return Response(
+                {'success': False, 'message': 'Shipment not found. Please check your tracking number.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if order.status in [Order.Status.COMPLETED, Order.Status.CANCELLED]:
+            return Response(
+                {'success': False, 'message': f"Order is already {order.get_status_display()}."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        pin = request.data.get('delivery_pin')
+        image = request.FILES.get('proof_of_delivery')
+
+        if not pin or not image:
+            return Response(
+                {'success': False, 'message': 'Both delivery_pin and proof_of_delivery (image) are required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if str(pin).strip() != order.delivery_pin:
+            return Response(
+                {'success': False, 'message': 'Invalid Delivery PIN.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Update the order
+        order.proof_of_delivery = image
+        order.status = Order.Status.COMPLETED
+        order.save()
+
+        return success_response('Proof of delivery submitted. Order completed successfully.')

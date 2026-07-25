@@ -177,6 +177,7 @@ When the server is running, interactive docs are available at:
 | GET | `/messages/unread/` | JWT (Dispatcher/Admin) | Unread messages grouped by chat/order |
 | GET / POST | `/{id}/messages/` | JWT | Order-scoped chat thread |
 | POST | `/{id}/messages/read/` | JWT | Mark messages in a specific chat as read |
+| WS | `ws/chat/orders/{id}/` | JWT (QS) | Real-time WebSocket connection for chat events |
 | POST | `/{id}/rate/` | JWT (Sender) | Rate a completed shipment (1–5 stars) |
 | POST | `/{id}/pod/` | JWT (Dispatcher/Admin) | Upload proof of delivery image & complete order |
 | GET | `/fleet/` | JWT (Dispatcher) | Fleet overview |
@@ -209,7 +210,9 @@ When the server is running, interactive docs are available at:
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/stats/` | Platform statistics for marketing page |
+| GET | `/locations/` | Get Nigerian states and LGAs for frontend dropdowns |
 | GET | `/track/{tracking_number}/` | Track a shipment by its tracking number |
+| POST | `/track/{tracking_number}/complete/` | Complete a delivery securely using a Delivery PIN (for drivers) |
 | POST | `/estimate/` | Calculate shipping cost from plain-text addresses |
 
 ---
