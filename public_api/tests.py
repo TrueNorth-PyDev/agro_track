@@ -47,6 +47,9 @@ class PublicAPITests(APITestCase):
         img.seek(0)
         pod_file = SimpleUploadedFile("pod.jpg", img.read(), content_type="image/jpeg")
 
+        self.order.status = Order.Status.DELIVERED
+        self.order.save()
+
         url = reverse('public_api:complete_delivery', kwargs={'tracking_number': self.order.tracking_number})
 
         # Test invalid PIN

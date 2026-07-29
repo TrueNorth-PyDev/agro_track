@@ -658,6 +658,9 @@ estimated_cost = (base_rate + distance_km × distance_surcharge_per_km) × prior
 
 Allows unauthenticated drivers to complete an order by providing the `delivery_pin` (given to the receiver) and a proof-of-delivery image. This endpoint should be sent as `multipart/form-data`.
 
+> [!WARNING]
+> The order **must** be in the `delivered` status before this endpoint can be used. If the order is still in transit (or any other state), the API will reject the PIN submission.
+
 **Form Data Fields:**
 - `delivery_pin`: (String) The 4-digit PIN the receiver has.
 - `proof_of_delivery`: (File) The photo confirming delivery.

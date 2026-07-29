@@ -340,7 +340,7 @@ class PublicCompleteDeliveryView(APIView):
     @extend_schema(
         tags=['Public API'],
         summary="Secure Proof of Delivery",
-        description="Allows a driver to mark an order as completed by submitting the receiver's secret Delivery PIN along with a proof-of-delivery photo. No authentication required.",
+        description="Allows a driver to mark an order as completed by submitting the receiver's secret Delivery PIN along with a proof-of-delivery photo. No authentication required. Note: The order must be in the 'delivered' status first.",
         request=inline_serializer('PublicPODRequest', {
             'delivery_pin': serializers.CharField(required=True, help_text="The 4-digit PIN given to the receiver"),
             'proof_of_delivery': serializers.ImageField(required=True)
@@ -360,9 +360,9 @@ class PublicCompleteDeliveryView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        if order.status in [Order.Status.COMPLETED, Order.Status.CANCELLED]:
+        if order.status != Order.Status.DELIVERED:
             return Response(
-                {'success': False, 'message': f"Order is already {order.get_status_display()}."},
+                {'success': False, 'message': f"Order must be marked as DELIVERED before it can be completed with a PIN. Current status: {order.get_status_display()}."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
