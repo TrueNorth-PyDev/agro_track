@@ -104,7 +104,8 @@ class Order(models.Model):
 
     class Priority(models.TextChoices):
         STANDARD = 'standard', 'Standard'
-        EXPRESS = 'express', 'Express'
+        EXPRESS  = 'express',  'Express'
+        SAME_DAY = 'same_day', 'Same Day'
 
     tracking_number = models.CharField(max_length=20, unique=True, default=generate_tracking_number, editable=False)
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sent_orders')

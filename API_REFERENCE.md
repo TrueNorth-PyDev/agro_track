@@ -77,6 +77,14 @@ Senders provide the pickup address, delivery address, cargo details, and contact
 - The order status is `new_request`.
 - The Timeline automatically logs an **"Order Placed"** event.
 
+**`cargo_priority` accepted values:**
+
+| Value | Display | Pricing multiplier |
+|---|---|---|
+| `standard` | Standard | 1.0× |
+| `express` | Express | 1.5× |
+| `same_day` | Same Day | 2.0× |
+
 ---
 
 ## 3. Dispatch & Fleet Assignment (The Dispatcher)
@@ -397,6 +405,62 @@ Returns **only unread messages**, grouped by order/chat thread. Use this to show
 > 2. User opens a chat → call `POST /orders/{id}/messages/read/` to clear that chat only.
 > 3. Re-fetch unread → the opened chat disappears from threads; others remain intact.
 
+### Global Notification Channel
+**`ws://<domain>/ws/notifications/?token=<jwt_access_token>`**
+
+A **server → client push-only** channel for real-time unread-badge updates. Dispatchers and admins connect once on app load; the backend pushes their current total unread count whenever it changes — no polling needed.
+
+- **Local dev:** `ws://localhost:8000/ws/notifications/?token=...`
+- **Production:** `wss://your-app.up.railway.app/ws/notifications/?token=...`
+
+**Access:** Dispatcher and Admin roles only. Senders are rejected with close code **4003**. Unauthenticated connections are rejected with **4001**.
+
+#### On Connect — Initial Snapshot
+
+Immediately after connecting the server pushes the current unread count so the badge is accurate before any message events fire:
+
+```json
+{
+  "type": "notification.unread_update",
+  "data": { "unread_count": 5 }
+}
+```
+
+#### Events Received
+
+| Event type | When fired | Payload |
+|---|---|---|
+| `notification.unread_update` | On connect (initial snapshot) | `{ unread_count: N }` |
+| `notification.unread_update` | A sender sends a new chat message to an order assigned to this dispatcher | `{ unread_count: N }` |
+| `notification.unread_update` | Dispatcher marks messages as read | `{ unread_count: N }` |
+
+> The payload always carries the **current total** unread count — never a delta. Simply set your badge to `data.unread_count` on every event.
+
+#### Frontend Code Example (JavaScript)
+
+```javascript
+const token = localStorage.getItem('access_token');
+const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+const domain = window.location.host;
+
+const notifSocket = new WebSocket(`${protocol}${domain}/ws/notifications/?token=${token}`);
+
+notifSocket.onmessage = function(e) {
+    const payload = JSON.parse(e.data);
+    if (payload.type === 'notification.unread_update') {
+        const count = payload.data.unread_count;
+        // Update your badge/bell icon
+        document.getElementById('unread-badge').textContent = count;
+        document.getElementById('unread-badge').hidden = count === 0;
+    }
+};
+
+notifSocket.onclose = function(e) {
+    console.warn('Notification socket closed. Reconnecting in 3s...');
+    setTimeout(() => connectNotificationSocket(), 3000);
+};
+```
+
 ---
 
 ## 6. Ratings & Reviews
@@ -542,11 +606,11 @@ estimated_cost = (base_rate + distance_km × distance_surcharge_per_km) × prior
 
 ### Priority Multipliers (configured in Admin → Platform Settings)
 
-| `cargo_priority` | Default Multiplier |
-|---|---|
-| `standard` | 1.0× |
-| `express` | 1.5× |
-| `same_day` | 2.0× |
+| `cargo_priority` | Display name | Default multiplier |
+|---|---|---|
+| `standard` | Standard | 1.0× |
+| `express` | Express | 1.5× |
+| `same_day` | Same Day | 2.0× |
 
 ### Request
 ```json

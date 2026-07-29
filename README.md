@@ -178,6 +178,7 @@ When the server is running, interactive docs are available at:
 | GET / POST | `/{id}/messages/` | JWT | Order-scoped chat thread |
 | POST | `/{id}/messages/read/` | JWT | Mark messages in a specific chat as read |
 | WS | `ws/chat/orders/{id}/` | JWT (QS) | Real-time WebSocket connection for chat events |
+| WS | `ws/notifications/` | JWT (QS, Dispatcher/Admin) | Global real-time unread-count push channel |
 | POST | `/{id}/rate/` | JWT (Sender) | Rate a completed shipment (1–5 stars) |
 | POST | `/{id}/pod/` | JWT (Dispatcher/Admin) | Upload proof of delivery image & complete order |
 | GET | `/fleet/` | JWT (Dispatcher) | Fleet overview |
@@ -233,11 +234,11 @@ estimated_cost = (base_rate + distance_km × distance_surcharge_per_km) × prior
 ```
 
 **Priority multipliers** (set in Admin → Platform Settings):
-| Priority | Multiplier (default) |
-|---|---|
-| `standard` | 1.0× |
-| `express` | 1.5× |
-| `same_day` | 2.0× |
+| Value | Display | Multiplier (default) |
+|---|---|---|
+| `standard` | Standard | 1.0× |
+| `express` | Express | 1.5× |
+| `same_day` | Same Day | 2.0× |
 
 **Request:**
 ```json

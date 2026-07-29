@@ -695,7 +695,7 @@ class OrderMessageListCreateView(GenericAPIView):
         # Create the message
         message = serializer.save(order=order, sender=request.user)
 
-        # Broadcast via WebSockets
+        # Broadcast to the order's chat room group
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f'chat_{order.id}',
@@ -704,6 +704,22 @@ class OrderMessageListCreateView(GenericAPIView):
                 'payload': serializer.data
             }
         )
+
+        # Push an unread-count update to the assigned dispatcher's notification channel
+        if order.dispatcher_id:
+            dispatcher_unread = (
+                OrderMessage.objects
+                .filter(order__dispatcher_id=order.dispatcher_id, is_read=False)
+                .exclude(sender_id=order.dispatcher_id)
+                .count()
+            )
+            async_to_sync(channel_layer.group_send)(
+                f'notifications_{order.dispatcher_id}',
+                {
+                    'type': 'notification_unread_update',
+                    'unread_count': dispatcher_unread,
+                }
+            )
 
         logger.info(
             "Message sent on order %s by %s",
@@ -763,9 +779,10 @@ class OrderMessageMarkReadView(GenericAPIView):
             is_read=False
         ).exclude(sender=request.user).update(is_read=True)
 
+        channel_layer = get_channel_layer()
+
         if updated_count > 0:
-            # Broadcast read receipt via WebSockets
-            channel_layer = get_channel_layer()
+            # Broadcast read receipt to the chat room
             async_to_sync(channel_layer.group_send)(
                 f'chat_{order.id}',
                 {
@@ -777,6 +794,23 @@ class OrderMessageMarkReadView(GenericAPIView):
                     }
                 }
             )
+
+        # Push refreshed unread count to the current user's notification channel
+        # (covers both dispatcher marking sender msgs read, and sender marking dispatcher msgs read)
+        fresh_unread = (
+            OrderMessage.objects
+            .filter(order__dispatcher=request.user, is_read=False)
+            .exclude(sender=request.user)
+            .count()
+        ) if (request.user.is_dispatcher or request.user.is_admin_user) else 0
+
+        async_to_sync(channel_layer.group_send)(
+            f'notifications_{request.user.id}',
+            {
+                'type': 'notification_unread_update',
+                'unread_count': fresh_unread,
+            }
+        )
 
         return Response({
             'success': True,
