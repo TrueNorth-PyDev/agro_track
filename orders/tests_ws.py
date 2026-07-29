@@ -30,8 +30,10 @@ class ChatConsumerTests(TransactionTestCase):
 
         self.order = Order.objects.create(
             sender=self.sender,
-            pickup_address="A",
-            delivery_address="B",
+            pickup_state="Kano",
+            pickup_lga="Kano Municipal",
+            delivery_state="Lagos",
+            delivery_lga="Ikeja",
             cargo_weight=100,
             cargo_value=1000
         )

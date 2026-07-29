@@ -59,10 +59,12 @@ When a sender wants to ship agricultural commodities, they create a new Order.
 Senders provide the pickup address, delivery address, cargo details, and contacts.
 ```json
 {
-  "pickup_address": "Farm 4, Ota, Ogun State",
+  "pickup_state": "Ogun",
+  "pickup_lga": "Ado-Odo/Ota",
   "pickup_contact_name": "Farmer Joe",
   "pickup_phone": "08033333333",
-  "delivery_address": "Mile 12 Market, Lagos",
+  "delivery_state": "Lagos",
+  "delivery_lga": "Kosofe",
   "delivery_name": "Mama Tomato",
   "delivery_phone": "08044444444",
   "cargo_type": "Fresh Tomatoes",

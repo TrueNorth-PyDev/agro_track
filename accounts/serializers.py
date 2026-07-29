@@ -73,7 +73,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     """
     Handles the 'Create an account' screen.
 
-    Fields: full_name, email, phone_number, delivery_address, password
+    Fields: full_name, email, phone_number, delivery_state, delivery_lga, password
     On success: creates an inactive, unverified user and sends an OTP email.
     """
     password = serializers.CharField(
@@ -85,12 +85,13 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('full_name', 'email', 'phone_number', 'delivery_address', 'password')
+        fields = ('full_name', 'email', 'phone_number', 'delivery_state', 'delivery_lga', 'password')
         extra_kwargs = {
             'full_name': {'required': True},
             'email': {'required': True},
             'phone_number': {'required': True},
-            'delivery_address': {'required': True},
+            'delivery_state': {'required': True},
+            'delivery_lga': {'required': True},
         }
 
     def validate_email(self, value):
@@ -144,7 +145,8 @@ class RegisterSerializer(serializers.ModelSerializer):
             password=validated_data['password'],
             full_name=validated_data['full_name'],
             phone_number=validated_data.get('phone_number', ''),
-            delivery_address=validated_data.get('delivery_address', ''),
+            delivery_state=validated_data.get('delivery_state', ''),
+            delivery_lga=validated_data.get('delivery_lga', ''),
             is_active=True,
             is_verified=True,
         )
@@ -436,6 +438,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'full_name',
             'phone_number',
             'business_name',
+            'delivery_state',
+            'delivery_lga',
             'delivery_address',
             'role',
             'is_verified',

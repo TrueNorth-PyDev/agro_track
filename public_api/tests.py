@@ -92,10 +92,10 @@ class PublicAPITests(APITestCase):
 
         self.order = Order.objects.create(
             sender=self.sender,
-            pickup_address='Lagos',
+            pickup_state="Kano", pickup_lga="Kano Municipal",
             pickup_contact_name='John',
             pickup_phone='08011112222',
-            delivery_address='Abuja',
+            delivery_state="Lagos", delivery_lga="Ikeja",
             delivery_name='Jane',
             delivery_phone='08033334444',
             cargo_type='Produce',
@@ -107,8 +107,8 @@ class PublicAPITests(APITestCase):
         Order.objects.create(
             sender=self.sender,
             status=Order.Status.COMPLETED,
-            pickup_address='Kano', pickup_contact_name='Dan', pickup_phone='123',
-            delivery_address='Kaduna', delivery_name='Joe', delivery_phone='123',
+            pickup_state="Kano", pickup_lga="Kano Municipal", pickup_contact_name='Dan', pickup_phone='123',
+            delivery_state="Lagos", delivery_lga="Ikeja", delivery_name='Joe', delivery_phone='123',
             cargo_type='Grain', cargo_weight=10, cargo_value=100
         )
 
@@ -133,10 +133,10 @@ class PublicAPITests(APITestCase):
         # Need a second order for a second review
         order2 = Order.objects.create(
             sender=self.sender,
-            pickup_address='A',
+            pickup_state="Kano", pickup_lga="Kano Municipal",
             pickup_contact_name='A',
             pickup_phone='123',
-            delivery_address='B',
+            delivery_state="Lagos", delivery_lga="Ikeja",
             delivery_name='B',
             delivery_phone='123',
             cargo_type='Test',
@@ -286,23 +286,23 @@ class CostEstimateTests(APITestCase):
 
     def test_missing_pickup_address(self):
         response = self.client.post(ESTIMATE_URL, {
-            'delivery_address': 'Abuja, FCT',
+            'delivery_state': 'Lagos', 'delivery_lga': 'Ikeja',
         }, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('pickup_address', response.data['errors'])
+        self.assertIn('pickup_state', response.data['errors'])
 
     def test_missing_delivery_address(self):
         response = self.client.post(ESTIMATE_URL, {
-            'pickup_address': 'Lagos Island',
+            'pickup_state': 'Kano', 'pickup_lga': 'Kano Municipal',
         }, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('delivery_address', response.data['errors'])
+        self.assertIn('delivery_state', response.data['errors'])
 
     def test_invalid_priority(self):
         with self._patch_resolve():
             response = self.client.post(ESTIMATE_URL, {
-                'pickup_address':   'Lagos Island',
-                'delivery_address': 'Kano City',
+                'pickup_state': 'Kano', 'pickup_lga': 'Kano Municipal',
+                'delivery_state': 'Lagos', 'delivery_lga': 'Ikeja',
                 'cargo_priority':   'ultra_fast',
             }, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -310,17 +310,17 @@ class CostEstimateTests(APITestCase):
 
     def test_same_address_rejected(self):
         response = self.client.post(ESTIMATE_URL, {
-            'pickup_address':   'Lagos Island',
-            'delivery_address': 'Lagos Island',
+            'pickup_state': 'Kano', 'pickup_lga': 'Kano Municipal',
+            'delivery_state': 'Kano', 'delivery_lga': 'Kano Municipal',
         }, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('delivery_address', response.data['errors'])
+        self.assertIn('delivery_lga', response.data['errors'])
 
     def test_successful_estimate_standard(self):
         with self._patch_resolve(530.0, 'osrm'):
             response = self.client.post(ESTIMATE_URL, {
-                'pickup_address':   'Lagos Island, Lagos',
-                'delivery_address': 'Abuja, FCT',
+                'pickup_state': 'Kano', 'pickup_lga': 'Kano Municipal',
+                'delivery_state': 'Lagos', 'delivery_lga': 'Ikeja',
                 'cargo_priority':   'standard',
             }, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -336,15 +336,15 @@ class CostEstimateTests(APITestCase):
     def test_successful_estimate_express_costs_more(self):
         with self._patch_resolve(530.0, 'osrm'):
             standard = self.client.post(ESTIMATE_URL, {
-                'pickup_address':   'Kano City, Kano',
-                'delivery_address': 'Port Harcourt, Rivers',
+                'pickup_state': 'Kano', 'pickup_lga': 'Kano Municipal',
+                'delivery_state': 'Lagos', 'delivery_lga': 'Ikeja',
                 'cargo_priority':   'standard',
             }, format='json').data['data']['estimated_cost']
 
         with self._patch_resolve(530.0, 'osrm'):
             express = self.client.post(ESTIMATE_URL, {
-                'pickup_address':   'Kano City, Kano',
-                'delivery_address': 'Port Harcourt, Rivers',
+                'pickup_state': 'Kano', 'pickup_lga': 'Kano Municipal',
+                'delivery_state': 'Lagos', 'delivery_lga': 'Ikeja',
                 'cargo_priority':   'express',
             }, format='json').data['data']['estimated_cost']
 
@@ -354,8 +354,8 @@ class CostEstimateTests(APITestCase):
         """If OSRM is down, haversine fallback should still return a valid estimate."""
         with self._patch_resolve(411.0, 'haversine'):
             response = self.client.post(ESTIMATE_URL, {
-                'pickup_address':   'Enugu, Enugu State',
-                'delivery_address': 'Abuja, FCT',
+                'pickup_state': 'Kano', 'pickup_lga': 'Kano Municipal',
+                'delivery_state': 'Lagos', 'delivery_lga': 'Ikeja',
                 'cargo_priority':   'standard',
             }, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -365,8 +365,8 @@ class CostEstimateTests(APITestCase):
     def test_unresolvable_address_returns_400(self):
         with patch('public_api.views.resolve_distance', side_effect=ValueError("Could not locate pickup address")):
             response = self.client.post(ESTIMATE_URL, {
-                'pickup_address':   'XYZXYZ999 Nonexistent Place',
-                'delivery_address': 'Abuja, FCT',
+                'pickup_state': 'Kano', 'pickup_lga': 'Kano Municipal',
+                'delivery_state': 'Lagos', 'delivery_lga': 'Ikeja',
             }, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('locate', response.data['message'])
@@ -374,8 +374,8 @@ class CostEstimateTests(APITestCase):
     def test_service_unavailable_returns_503(self):
         with patch('public_api.views.resolve_distance', side_effect=Exception("Connection refused")):
             response = self.client.post(ESTIMATE_URL, {
-                'pickup_address':   'Lagos Island',
-                'delivery_address': 'Abuja, FCT',
+                'pickup_state': 'Kano', 'pickup_lga': 'Kano Municipal',
+                'delivery_state': 'Lagos', 'delivery_lga': 'Ikeja',
             }, format='json')
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
 
@@ -383,8 +383,8 @@ class CostEstimateTests(APITestCase):
         """Same-state trips (e.g. Ikeja to Surulere) should resolve fine."""
         with self._patch_resolve(22.0, 'osrm'):
             response = self.client.post(ESTIMATE_URL, {
-                'pickup_address':   'Ikeja, Lagos',
-                'delivery_address': 'Surulere, Lagos',
+                'pickup_state': 'Kano', 'pickup_lga': 'Kano Municipal',
+                'delivery_state': 'Lagos', 'delivery_lga': 'Ikeja',
                 'cargo_priority':   'standard',
             }, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -393,14 +393,14 @@ class CostEstimateTests(APITestCase):
     def test_response_contains_all_fields(self):
         with self._patch_resolve(300.0, 'osrm'):
             response = self.client.post(ESTIMATE_URL, {
-                'pickup_address':   'Ibadan, Oyo State',
-                'delivery_address': 'Benin City, Edo State',
+                'pickup_state': 'Kano', 'pickup_lga': 'Kano Municipal',
+                'delivery_state': 'Lagos', 'delivery_lga': 'Ikeja',
             }, format='json')
         data = response.data['data']
         required_fields = [
             'estimated_cost', 'base_rate', 'distance_charge',
             'distance_km', 'priority_multiplier', 'cargo_priority',
-            'pickup_address', 'delivery_address', 'distance_method',
+            'pickup_state', 'delivery_state', 'distance_method',
         ]
         for field in required_fields:
             self.assertIn(field, data, f"Missing field: {field}")

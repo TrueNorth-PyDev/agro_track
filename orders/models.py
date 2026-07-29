@@ -129,14 +129,16 @@ class Order(models.Model):
     delivery_pin = models.CharField(max_length=10, default=generate_delivery_pin, help_text="PIN required to confirm delivery")
 
     # Pickup Info
-    pickup_address = models.CharField(max_length=255)
+    pickup_state = models.CharField(max_length=100, default='Unknown')
+    pickup_lga = models.CharField(max_length=100, default='Unknown')
     pickup_contact_name = models.CharField(max_length=255)
     pickup_phone = models.CharField(max_length=20)
     pickup_date = models.DateField(null=True, blank=True)
     pickup_notes = models.TextField(blank=True, default='')
 
     # Delivery Info
-    delivery_address = models.CharField(max_length=255)
+    delivery_state = models.CharField(max_length=100, default='Unknown')
+    delivery_lga = models.CharField(max_length=100, default='Unknown')
     delivery_name = models.CharField(max_length=255)
     delivery_phone = models.CharField(max_length=20)
     delivery_email = models.EmailField(blank=True, default='')
@@ -161,6 +163,16 @@ class Order(models.Model):
 
     def __str__(self):
         return f"{self.tracking_number} - {self.get_status_display()}"
+
+    @property
+    def pickup_address(self) -> str:
+        """Computed property for backwards compatibility and geocoding."""
+        return f"{self.pickup_lga}, {self.pickup_state}"
+
+    @property
+    def delivery_address(self) -> str:
+        """Computed property for backwards compatibility and geocoding."""
+        return f"{self.delivery_lga}, {self.delivery_state}"
 
     # ------------------------------------------------------------------
     # Timeline Helpers
@@ -233,8 +245,8 @@ class Order(models.Model):
 
         # ── PENDING PICKUP ───────────────────────────────────────────────────
         if status == self.Status.PENDING_PICKUP:
-            # Extract the first meaningful segment of the pickup address as a location hint
-            location_hint = (self.pickup_address or '').split(',')[0].strip()
+            # Extract the LGA as a location hint
+            location_hint = self.pickup_lga
             desc = f"Cargo loaded at {location_hint}" if location_hint else "Pickup confirmed"
             return "Pickup Confirmed", desc
 
@@ -246,7 +258,7 @@ class Order(models.Model):
         # ── DELIVERED ───────────────────────────────────────────────────────
         if status == self.Status.DELIVERED:
             recipient = self.delivery_name or "recipient"
-            desc = f"Delivered to {recipient} at {self.delivery_address.split(',')[0].strip()}"
+            desc = f"Delivered to {recipient} at {self.delivery_lga}"
             return "Delivered", desc
 
         # ── COMPLETED ───────────────────────────────────────────────────────

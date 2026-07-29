@@ -45,7 +45,8 @@ def make_user(
         password=password,
         full_name=kwargs.get('full_name', 'Test User'),
         phone_number=kwargs.get('phone_number', '08012345678'),
-        delivery_address=kwargs.get('delivery_address', '12 Test Street, Lagos'),
+        delivery_state=kwargs.get('delivery_state', 'FCT'),
+        delivery_lga=kwargs.get('delivery_lga', 'Abuja Municipal'),
         role=role,
         is_active=verified,
         is_verified=verified,
@@ -122,7 +123,7 @@ class RegisterTests(APITestCase):
             'full_name': 'John Doe',
             'email': 'john@example.com',
             'phone_number': '08012345678',
-            'delivery_address': '15 Farm Road, Abuja',
+            'delivery_state': '15 Farm Road, Abuja', 'delivery_lga': '15 Farm Road, Abuja',
             'password': 'SecurePass1!',
         }
 

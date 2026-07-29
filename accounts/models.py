@@ -39,7 +39,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     # Profile fields (from registration screen)
     full_name = models.CharField(_('full name'), max_length=255)
     phone_number = models.CharField(_('phone number'), max_length=20, blank=True)
-    delivery_address = models.TextField(_('delivery address'), blank=True)
+    delivery_state = models.CharField(_('delivery state'), max_length=100, blank=True, default='')
+    delivery_lga = models.CharField(_('delivery lga'), max_length=100, blank=True, default='')
 
     # Role
     role = models.CharField(
@@ -113,6 +114,13 @@ class User(AbstractBaseUser, PermissionsMixin):
     @property
     def is_dispatcher(self):
         return self.role == self.Role.DISPATCHER
+        
+    @property
+    def delivery_address(self) -> str:
+        """Backwards compatibility for delivery_address property"""
+        if self.delivery_state and self.delivery_lga:
+            return f"{self.delivery_lga}, {self.delivery_state}"
+        return ""
 
     @property
     def is_admin_user(self):

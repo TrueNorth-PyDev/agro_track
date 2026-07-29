@@ -131,13 +131,19 @@ class OrderListSerializer(serializers.ModelSerializer):
     """
     driver = DriverSerializer(read_only=True)
     review = ReviewReadSerializer(read_only=True)
+    pickup_address = serializers.ReadOnlyField()
+    delivery_address = serializers.ReadOnlyField()
 
     class Meta:
         model = Order
         fields = (
             'id',
             'tracking_number',
+            'pickup_state',
+            'pickup_lga',
             'pickup_address',
+            'delivery_state',
+            'delivery_lga',
             'delivery_address',
             'status',
             'created_at',
@@ -156,6 +162,8 @@ class OrderDetailSerializer(serializers.ModelSerializer):
     vehicle = VehicleSerializer(read_only=True)
     timeline = OrderStatusHistorySerializer(many=True, read_only=True)
     review = ReviewReadSerializer(read_only=True)
+    pickup_address = serializers.ReadOnlyField()
+    delivery_address = serializers.ReadOnlyField()
 
     driver_id = serializers.PrimaryKeyRelatedField(
         queryset=Driver.objects.all(), source='driver', write_only=True, required=False, allow_null=True
@@ -211,9 +219,9 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         model = Order
         fields = (
             # Step 1 — Pickup
-            'pickup_address', 'pickup_contact_name', 'pickup_phone', 'pickup_date', 'pickup_notes',
+            'pickup_state', 'pickup_lga', 'pickup_contact_name', 'pickup_phone', 'pickup_date', 'pickup_notes',
             # Step 2 — Delivery
-            'delivery_address', 'delivery_name', 'delivery_phone', 'delivery_email',
+            'delivery_state', 'delivery_lga', 'delivery_name', 'delivery_phone', 'delivery_email',
             # Step 3 — Cargo & Pricing
             'cargo_type', 'cargo_weight', 'cargo_value', 'cargo_priority',
             'base_rate', 'distance_surcharge', 'total_cost',
@@ -223,6 +231,43 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         """Automatically assign the logged-in user as the sender."""
         validated_data['sender'] = self.context['request'].user
         return super().create(validated_data)
+
+    def validate(self, attrs):
+        pickup_state = attrs.get('pickup_state')
+        pickup_lga = attrs.get('pickup_lga')
+        delivery_state = attrs.get('delivery_state')
+        delivery_lga = attrs.get('delivery_lga')
+
+        import json
+        import os
+        from django.conf import settings
+        
+        path = os.path.join(settings.BASE_DIR, 'public_api', 'data', 'nigeria_states.json')
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                states_data = json.load(f)
+        except Exception:
+            states_data = []
+        
+        states_map = {item['state'].lower(): [lga.lower() for lga in item['lgas']] for item in states_data}
+
+        errors = {}
+        if pickup_state and pickup_lga:
+            if pickup_state.lower() not in states_map:
+                errors['pickup_state'] = 'Invalid state.'
+            elif pickup_lga.lower() not in states_map[pickup_state.lower()]:
+                errors['pickup_lga'] = f'Invalid LGA for {pickup_state}.'
+
+        if delivery_state and delivery_lga:
+            if delivery_state.lower() not in states_map:
+                errors['delivery_state'] = 'Invalid state.'
+            elif delivery_lga.lower() not in states_map[delivery_state.lower()]:
+                errors['delivery_lga'] = f'Invalid LGA for {delivery_state}.'
+        
+        if errors:
+            raise serializers.ValidationError(errors)
+            
+        return attrs
 
 
 class ReviewSerializer(serializers.ModelSerializer):

@@ -23,13 +23,13 @@ class OrderTests(APITestCase):
         self.client.force_authenticate(user=self.user)
 
         self.valid_payload = {
-            'pickup_address': 'Plot 204, Nitel Industrial Avenue',
+            'pickup_address': 'Kano', 'pickup_address': 'Kano Municipal',
             'pickup_contact_name': 'John Doe',
             'pickup_phone': '+2348000000000',
             'pickup_date': '2026-07-10',
             'pickup_notes': 'Gate code is 1234',
 
-            'delivery_address': 'Plot 204, Waterline Zone Estate',
+            'delivery_address': 'Lagos', 'delivery_address': 'Ikeja',
             'delivery_name': 'Jane Smith',
             'delivery_phone': '+2348000000001',
             'delivery_email': 'jane@example.com',
@@ -127,10 +127,10 @@ class TimelineDisplayNameTests(APITestCase):
     def _create_order(self):
         return Order.objects.create(
             sender=self.sender,
-            pickup_address='Enugu Agro Partners, Independence Layout, Enugu',
+            pickup_state="Enugu", pickup_lga="Enugu Agro Partners",
             pickup_contact_name='Contact Name',
             pickup_phone='+2340000000000',
-            delivery_address='Alaba Farm Market, Trade Fair Complex, Lagos',
+            delivery_state="Lagos", delivery_lga="Ikeja",
             delivery_name='Recipient Name',
             delivery_phone='+2340000000001',
             cargo_type='Grains',
@@ -563,10 +563,10 @@ INBOX_URL = '/api/v1/orders/messages/'
 
 def _make_order(sender, dispatcher=None, **kwargs):
     defaults = dict(
-        pickup_address='Farm A, Kano',
+        pickup_state="Enugu", pickup_lga="Enugu Agro Partners",
         pickup_contact_name='Dan',
         pickup_phone='0800000001',
-        delivery_address='Mile 12, Lagos',
+        delivery_state="Lagos", delivery_lga="Ikeja",
         delivery_name='Ola',
         delivery_phone='0800000002',
         cargo_type='Tomatoes',
@@ -604,7 +604,7 @@ class DispatcherInboxTests(APITestCase):
         # A second order also assigned to our dispatcher
         self.order2 = _make_order(
             self.sender, dispatcher=self.dispatcher,
-            pickup_address='Kaduna City', delivery_address='Abuja, FCT'
+            pickup_state="Enugu", pickup_lga="Enugu Agro Partners", delivery_state="Lagos", delivery_lga="Ikeja"
         )
         # An order assigned to a different dispatcher (should NOT appear)
         self.order_other = _make_order(self.sender, dispatcher=self.other_dispatcher)
@@ -750,7 +750,7 @@ class DispatcherUnreadTests(APITestCase):
         self.order1 = _make_order(self.sender, dispatcher=self.dispatcher)
         self.order2 = _make_order(
             self.sender, dispatcher=self.dispatcher,
-            pickup_address='Kaduna', delivery_address='Abuja',
+            pickup_state="Enugu", pickup_lga="Enugu Agro Partners", delivery_state="Lagos", delivery_lga="Ikeja",
         )
 
     # ── Access control ────────────────────────────────────────────────────

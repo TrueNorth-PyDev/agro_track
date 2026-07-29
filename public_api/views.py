@@ -43,12 +43,10 @@ class PublicCostEstimateView(APIView):
             "Falls back to straight-line × 1.3 road correction if the routing service is unavailable."
         ),
         request=inline_serializer('CostEstimateRequest', {
-            'pickup_address': serializers.CharField(
-                help_text="Full pickup address, e.g. 'Kano City, Kano State'"
-            ),
-            'delivery_address': serializers.CharField(
-                help_text="Full delivery address, e.g. 'Mile 12 Market, Lagos'"
-            ),
+            'pickup_state': serializers.CharField(help_text="e.g. 'Kano'"),
+            'pickup_lga': serializers.CharField(help_text="e.g. 'Kano Municipal'"),
+            'delivery_state': serializers.CharField(help_text="e.g. 'Lagos'"),
+            'delivery_lga': serializers.CharField(help_text="e.g. 'Ikeja'"),
             'cargo_priority': serializers.ChoiceField(
                 choices=['standard', 'express', 'same_day'],
                 default='standard',
@@ -63,8 +61,10 @@ class PublicCostEstimateView(APIView):
                 'distance_km':         serializers.FloatField(),
                 'priority_multiplier': serializers.FloatField(),
                 'cargo_priority':      serializers.CharField(),
-                'pickup_address':      serializers.CharField(),
-                'delivery_address':    serializers.CharField(),
+                'pickup_state':        serializers.CharField(),
+                'pickup_lga':          serializers.CharField(),
+                'delivery_state':      serializers.CharField(),
+                'delivery_lga':        serializers.CharField(),
                 'distance_method':     serializers.CharField(
                     help_text="'osrm' = actual road routing | 'haversine' = straight-line fallback"
                 ),
@@ -75,21 +75,46 @@ class PublicCostEstimateView(APIView):
     )
     def post(self, request, *args, **kwargs):
         # ── 1. Input validation ──────────────────────────────────────────────
-        pickup_address   = (request.data.get('pickup_address')   or '').strip()
-        delivery_address = (request.data.get('delivery_address') or '').strip()
-        cargo_priority   = (request.data.get('cargo_priority')   or 'standard').strip()
+        pickup_state   = (request.data.get('pickup_state')   or '').strip()
+        pickup_lga     = (request.data.get('pickup_lga')     or '').strip()
+        delivery_state = (request.data.get('delivery_state') or '').strip()
+        delivery_lga   = (request.data.get('delivery_lga')   or '').strip()
+        cargo_priority = (request.data.get('cargo_priority') or 'standard').strip()
 
         errors = {}
 
-        if not pickup_address:
-            errors['pickup_address'] = ['This field is required.']
-        elif len(pickup_address) < 3:
-            errors['pickup_address'] = ['Please provide a more specific address.']
+        if not pickup_state:
+            errors['pickup_state'] = ['This field is required.']
+        if not pickup_lga:
+            errors['pickup_lga'] = ['This field is required.']
+        if not delivery_state:
+            errors['delivery_state'] = ['This field is required.']
+        if not delivery_lga:
+            errors['delivery_lga'] = ['This field is required.']
 
-        if not delivery_address:
-            errors['delivery_address'] = ['This field is required.']
-        elif len(delivery_address) < 3:
-            errors['delivery_address'] = ['Please provide a more specific address.']
+        # Validate against known states if provided
+        import os
+        import json
+        from django.conf import settings
+        path = os.path.join(settings.BASE_DIR, 'public_api', 'data', 'nigeria_states.json')
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                states_data = json.load(f)
+            states_map = {item['state'].lower(): [lga.lower() for lga in item['lgas']] for item in states_data}
+            
+            if pickup_state and pickup_lga:
+                if pickup_state.lower() not in states_map:
+                    errors['pickup_state'] = ['Invalid state.']
+                elif pickup_lga.lower() not in states_map[pickup_state.lower()]:
+                    errors['pickup_lga'] = [f'Invalid LGA for {pickup_state}.']
+                    
+            if delivery_state and delivery_lga:
+                if delivery_state.lower() not in states_map:
+                    errors['delivery_state'] = ['Invalid state.']
+                elif delivery_lga.lower() not in states_map[delivery_state.lower()]:
+                    errors['delivery_lga'] = [f'Invalid LGA for {delivery_state}.']
+        except Exception:
+            pass # Skip validation if data file is missing/broken
 
         valid_priorities = ['standard', 'express', 'same_day']
         if cargo_priority not in valid_priorities:
@@ -101,13 +126,16 @@ class PublicCostEstimateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        pickup_address = f"{pickup_lga}, {pickup_state}"
+        delivery_address = f"{delivery_lga}, {delivery_state}"
+
         # Catch the trivial same-address case before hitting external services.
         if pickup_address.lower() == delivery_address.lower():
             return Response(
                 {
                     'success': False,
                     'message': 'Pickup and delivery addresses must be different.',
-                    'errors': {'delivery_address': ['Must differ from pickup address.']},
+                    'errors': {'delivery_lga': ['Must differ from pickup address.']},
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -158,8 +186,10 @@ class PublicCostEstimateView(APIView):
             'distance_km':         distance_km,
             'priority_multiplier': multiplier,
             'cargo_priority':      cargo_priority,
-            'pickup_address':      pickup_address,
-            'delivery_address':    delivery_address,
+            'pickup_state':        pickup_state,
+            'pickup_lga':          pickup_lga,
+            'delivery_state':      delivery_state,
+            'delivery_lga':        delivery_lga,
             'distance_method':     distance_method,
         }
 
