@@ -79,11 +79,32 @@ TEMPLATES = [
 WSGI_APPLICATION = 'agrotrack.wsgi.application'
 ASGI_APPLICATION = 'agrotrack.asgi.application'
 
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
-    },
-}
+# ---------------------------------------------------------------------------
+# Channels (WebSocket) layer
+# ---------------------------------------------------------------------------
+# Group state (chat rooms, per-user notification channels) must be shared
+# across every process handling WebSocket connections — an in-memory layer
+# only sees the groups joined within its own process, so broadcasts silently
+# fail to reach clients connected to a different worker/replica.
+# REDIS_URL enables the shared Redis-backed layer; unset it locally to fall
+# back to InMemoryChannelLayer, which is fine for a single dev process.
+REDIS_URL = config('REDIS_URL', default='')
+
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [REDIS_URL],
+            },
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

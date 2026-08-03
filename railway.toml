@@ -7,7 +7,9 @@ builder = "RAILPACK"
 buildCommand = "pip install -r requirements.txt && python manage.py collectstatic --noinput"
 
 [deploy]
-startCommand = "gunicorn agrotrack.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 2 --worker-class gthread --log-file - --access-logfile -"
+# Must serve the ASGI app (not WSGI) so WebSocket upgrade requests
+# (ws/chat/orders/{id}/, ws/notifications/) work in production.
+startCommand = "daphne -b 0.0.0.0 -p $PORT agrotrack.asgi:application"
 preDeployCommand = ["python manage.py migrate --noinput"]
 healthcheckPath = "/api/schema/"
 healthcheckTimeout = 300

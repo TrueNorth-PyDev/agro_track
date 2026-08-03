@@ -427,6 +427,7 @@ Set these in your Railway service's **Variables** tab:
 | `AWS_ACCESS_KEY_ID` | ❌ | AWS Access Key (REQUIRED if bucket name is set) |
 | `AWS_SECRET_ACCESS_KEY` | ❌ | AWS Secret Key (REQUIRED if bucket name is set) |
 | `AWS_S3_REGION_NAME` | ❌ | e.g. `eu-west-1` (Defaults to `us-east-1`) |
+| `REDIS_URL` | ✅ | Channels layer backend for WebSocket chat/notifications — required for broadcasts to reach clients across processes/replicas |
 
 ### Deploy Flow
 
@@ -436,11 +437,14 @@ Railway runs these steps automatically on every push:
 1. RAILPACK build     → pip install -r requirements.txt
                       → python manage.py collectstatic --noinput
 2. Pre-deploy         → python manage.py migrate --noinput
-3. Start              → gunicorn agrotrack.wsgi:application \
-                          --bind 0.0.0.0:$PORT \
-                          --workers 2 --threads 2
+3. Start              → daphne -b 0.0.0.0 -p $PORT agrotrack.asgi:application
 4. Health check       → GET /api/schema/ must return 200
 ```
+
+> The app is served via the **ASGI** app (Daphne), not WSGI/gunicorn — this is required for
+> WebSocket upgrade requests (`ws/chat/orders/{id}/`, `ws/notifications/`) to work at all.
+> The Channels layer additionally needs `REDIS_URL` set so chat/notification broadcasts reach
+> clients connected to a different replica than the one that triggered the event.
 
 ### Django Admin
 
